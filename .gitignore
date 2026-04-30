@@ -28,7 +28,12 @@ yarn-error.log*
 .env.production.local
 
 # Editor settings
-.vscode/
+.vscode/*.log
+.vscode/project.xcworkspace
+.vscode/xcuserdata
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
 !.vscode/extensions.json
 .idea/
 *.suo
