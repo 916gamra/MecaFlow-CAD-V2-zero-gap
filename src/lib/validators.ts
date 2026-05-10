@@ -47,8 +47,11 @@ export function validatePanConfig(config: any) {
   if (!config.height || config.height <= 0) {
     errors.push({ field: 'height', message: 'الارتفاع يجب أن يكون أكبر من 0' });
   }
-  if (!config.curveRadius || config.curveRadius <= 0) {
-    errors.push({ field: 'curveRadius', message: 'نصف قطر المنحنى يجب أن يكون أكبر من 0' });
+  if (config.curveRadius != null && config.curveRadius < 0) {
+    errors.push({ field: 'curveRadius', message: 'نصف قطر المنحنى لا يمكن أن يكون سالباً' });
+  }
+  if (config.wallThickness != null && config.wallThickness <= 0) {
+    errors.push({ field: 'wallThickness', message: 'سمك الجدار يجب أن يكون أكبر من 0' });
   }
 
   if (errors.length > 0) {

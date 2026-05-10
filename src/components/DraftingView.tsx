@@ -1,6 +1,11 @@
 import React from 'react';
+import { ZeroGapState } from '../types';
 
-const DraftingView: React.FC = () => {
+interface DraftingViewProps {
+  config: ZeroGapState;
+}
+
+const DraftingView: React.FC<DraftingViewProps> = ({ config }) => {
   return (
     <div className="w-full h-full bg-[var(--bg-deep)] p-8 rounded overflow-auto flex flex-col items-center justify-center p-8" id="drafting-view">
       <div className="w-full max-w-4xl bg-[var(--bg-panel)] border border-[var(--border)] rounded flex flex-col p-8 shadow-2xl">
@@ -20,16 +25,16 @@ const DraftingView: React.FC = () => {
                <div className="relative w-40 h-40 border-2 border-dashed border-[var(--accent)] rounded-full flex items-center justify-center mb-4">
                   <div className="absolute top-0 bottom-0 w-px bg-[var(--accent)]/50"></div>
                   <div className="absolute left-0 right-0 h-px bg-[var(--accent)]/50"></div>
-                  <span className="bg-[#0c0d10] px-2 text-[var(--accent)]">Ø TOP</span>
+                  <span className="bg-[#0c0d10] px-2 text-[var(--accent)]">Ø TOP {config.pan.topDiameter}mm</span>
                </div>
-               [ مسقط رأسي للمقلاة ]
+               [ مسقط رأسي للمقلاة - قطر: {config.pan.topDiameter}mm ]
             </div>
             <div className="border border-[var(--border)] bg-[#0c0d10] p-6 text-center text-[var(--text-dim)] font-mono text-[10px] flex flex-col items-center justify-center min-h-[250px]">
                <div className="relative w-20 h-40 border-2 border-[var(--accent)] rounded-sm flex items-center justify-center mb-4">
                   <div className="absolute top-0 bottom-0 w-px bg-[var(--accent)]/50"></div>
-                  <span className="bg-[#0c0d10] px-2 text-[var(--accent)] absolute -right-6 origin-left -rotate-90 whitespace-nowrap">TUBE LENGTH</span>
+                  <span className="bg-[#0c0d10] px-2 text-[var(--accent)] absolute -right-6 origin-left -rotate-90 whitespace-nowrap">TUBE L: {config.tube.totalLength}mm</span>
                </div>
-               [ مسقط جانبي للأنبوب مع زاوية القص ]
+               [ مسقط جانبي للأنبوب - أبعاد: {config.tube.width}x{config.tube.shape === 'دائري' ? config.tube.width : config.tube.height}mm ]
             </div>
          </div>
 

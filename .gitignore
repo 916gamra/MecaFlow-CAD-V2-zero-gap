@@ -64,3 +64,9 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# AI and Agents
+.agents/
+.cursor/
+.gemini/
+graphify-out/

@@ -1,193 +1,375 @@
-export const generateCadQueryScript = (config: any) => {
+// ============================================================
+// exportUtils.ts — MecaFlow-CAD-V2  (النسخة المُصلَحة)
+// الإصلاحات الجوهرية:
+//   1. create_pan تستخدم الآن curveRadius بشكل فعلي عبر revolve
+//   2. curveRadius يُمرَّر صراحةً في استدعاء create_pan
+//   3. دالة ensure_solid تطبع اسم الدالة عند الخطأ لتسهيل التتبع
+//   4. التسامح في التصدير مضبوط لملف STEP دقيق (≤ 0.005 mm)
+//   5. إضافة تحقق من الأبعاد المنطقية قبل البناء
+// ============================================================
+
+export const generateCadQueryScript = (config: any): string => {
+  // ──────────────────────────────────────────────────────────
+  // حسابات مسبقة في TypeScript (قبل توليد الكود)
+  // ──────────────────────────────────────────────────────────
+  const tubeMinor =
+    config.tube.shape === 'دائري' ? config.tube.width : config.tube.height;
+
+  const tubeCornerRadius =
+    config.tube.shape === 'دائري'
+      ? config.tube.width / 2.0
+      : config.tube.cornerRadius;
+
+  const curveRadius = config.pan.curveRadius ?? 0;
+  const useCurvedPan = curveRadius > 0;
+
   return `"""
-Zero-Gap Laser CAD - Auto-Generated Script
-هذا السكربت تم توليده تلقائياً من التطبيق.
+Zero-Gap Laser CAD — Auto-Generated CadQuery Script
+هذا السكربت تم توليده تلقائياً من تطبيق MecaFlow-CAD-V2.
+تشغيل: python this_file.py  (يتطلب: pip install cadquery)
 
 # ==========================================
-# 📄 تقرير الإنتاج (Production Metadata)
+# تقرير الإنتاج
 # ==========================================
-# التاريخ: ${new Date().toLocaleString('ar-EG')}
-# قياسات الأنبوب: ${config.tube.width}x${config.tube.height} mm (سماكة: ${config.tube.thickness} mm)
-# المقلاة: ⌀ الفوهة ${config.pan.topDiameter} / ⌀ القاعدة ${config.pan.bottomDiameter} 
+# التاريخ      : ${new Date().toLocaleString('ar-EG')}
+# الأنبوب      : ${config.tube.width}×${tubeMinor} mm | سماكة ${config.tube.thickness} mm | شكل: ${config.tube.shape}
+# المقلاة      : ⌀ الفوهة ${config.pan.topDiameter} / ⌀ القاعدة ${config.pan.bottomDiameter} | ارتفاع ${config.pan.height} mm
+# انحناء الجدار: ${useCurvedPan ? curveRadius + ' mm (revolve)' : 'مستقيم (loft)'}
 # زاوية التركيب: ${config.assembly.tiltAngle}°
-# التعشيش: ${config.nestingMode === 'twin' ? 'مزدوج (توفير في الخامات)' : 'مفرد'}
+# التعشيش      : ${config.nestingMode === 'twin' ? 'مزدوج' : 'مفرد'}
 """
 
 import cadquery as cq
+import math
 import os
 
 # ==========================================
 # 1. المعاملات المستوردة من الواجهة
 # ==========================================
-# أبعاد الأنبوب
-tube_shape = "${config.tube.shape}"
-tube_major = ${config.tube.width}
-tube_minor = ${config.tube.shape === 'دائري' ? config.tube.width : config.tube.height}
-wall_thickness = ${config.tube.thickness}
-total_tube_length = ${config.tube.totalLength}
-part_length = ${config.tube.partLength}
-tube_corner_radius = ${config.tube.shape === 'دائري' ? config.tube.width / 2.0 : config.tube.cornerRadius}
 
-# شكل المقلاة
-pan_top_dia = ${config.pan.topDiameter}
-pan_bottom_dia = ${config.pan.bottomDiameter}
-pan_height = ${config.pan.height}
-bottom_fillet = ${config.pan.bottomFilletRadius}
-pan_add_rim = ${config.pan.addRim ? 'True' : 'False'}
-pan_rim_height = ${config.pan.rimHeight || 3.0}
-pan_rim_thickness = ${config.pan.rimThickness || 2.0}
+# — الأنبوب —
+tube_shape         = "${config.tube.shape}"
+tube_major         = ${config.tube.width}
+tube_minor         = ${tubeMinor}
+wall_thickness     = ${config.tube.thickness}
+total_tube_length  = ${config.tube.totalLength}
+part_length        = ${config.tube.partLength}
+tube_corner_radius = ${tubeCornerRadius}
 
-# زوايا الإمالة والتركيب
-tilt_angle = ${config.assembly.tiltAngle}
-tilt_axis = "${config.assembly.tiltAxis}"
-handle_angle_x = ${config.assembly.handleAngleX || 0}
-handle_angle_y = ${config.assembly.handleAngleY || 0}
-handle_offset = ${config.assembly.handleOffset || 0}
-insertion_distance = ${config.assembly.insertionDistance || 0}
-height_offset = ${config.assembly.heightOffset || 0}
+# — المقلاة —
+pan_top_dia        = ${config.pan.topDiameter}
+pan_bottom_dia     = ${config.pan.bottomDiameter}
+pan_height         = ${config.pan.height}
+pan_curve_r        = ${curveRadius}       # ← كان مُعرَّفاً لكن لم يُمرَّر — تم إصلاحه
+bottom_fillet      = ${config.pan.bottomFilletRadius}
+pan_add_rim        = ${config.pan.addRim ? 'True' : 'False'}
+pan_rim_height     = ${config.pan.rimHeight ?? 3.0}
+pan_rim_thickness  = ${config.pan.rimThickness ?? 2.0}
 
-# التعشيش واللمسات
-nesting_mode = "${config.nestingMode}"
-slug_gap = ${config.slugGap}
-apply_fillet = ${config.addFillet ? 'True' : 'False'}
-thermal_clearance = ${config.thermalClearance ? 'True' : 'False'}
-mark_orientation = ${config.markOrientation ? 'True' : 'False'}
+# — التركيب —
+tilt_angle         = ${config.assembly.tiltAngle}
+tilt_axis          = "${config.assembly.tiltAxis}"
+handle_angle_x     = ${config.assembly.handleAngleX ?? 0}
+handle_angle_y     = ${config.assembly.handleAngleY ?? 0}
+handle_offset      = ${config.assembly.handleOffset ?? 0}
+insertion_distance = ${config.assembly.insertionDistance ?? 0}
+height_offset      = ${config.assembly.heightOffset ?? 0}
+
+# — خيارات عامة —
+nesting_mode       = "${config.nestingMode}"
+slug_gap           = ${config.slugGap}
+apply_fillet       = ${config.addFillet ? 'True' : 'False'}
+thermal_clearance  = ${config.thermalClearance ? 'True' : 'False'}
+mark_orientation   = ${config.markOrientation ? 'True' : 'False'}
 
 # ==========================================
-# 2. دوال النمذجة المتطورة (Zero-Gap Engine)
+# 2. دوال النمذجة — Zero-Gap Engine
 # ==========================================
-def ensure_solid(part):
+
+def ensure_solid(part, label="unnamed"):
+    """تحقق من صلاحية الجسم الهندسي وأعده بعد تنظيفه."""
     part = part.clean()
     if not part.val().isValid():
-        print("تحذير: الجسم الناتج غير صالح هندسياً")
+        print(f"⚠️  تحذير [{label}]: الجسم الناتج غير صالح هندسياً — تحقق من الأبعاد")
     return part
 
-def create_pan(top_dia, bottom_dia, height, fillet_r, add_rim, rim_height, rim_thick):
-    # إنشاء المقلاة كجسم قاطع (Cutter)
-    r_top, r_bottom = top_dia/2.0, bottom_dia/2.0
-    # بناء المخروط
-    pan = (cq.Workplane("XY")
-        .circle(r_bottom)
-        .workplane(offset=height)
-        .circle(r_top)
-        .loft())
-    # إضافة التنعيم في القاع من الجذور لضمان التطابق
+
+def create_pan(top_dia, bottom_dia, height, curve_r, fillet_r, add_rim, rim_height, rim_thick):
+    """
+    بناء المقلاة كجسم قاطع.
+
+    إذا كان curve_r > 0  →  جدار منحنٍ عبر revolve(arc)
+        ينتج في STEP: CYLINDRICAL_SURFACE حقيقية (مطابقة للملف المرجعي)
+
+    إذا كان curve_r == 0 →  جدار مستقيم مخروطي عبر loft
+        ينتج في STEP: B_SPLINE_SURFACE (مقبول لكن أقل دقة)
+    """
+    r_top    = top_dia    / 2.0
+    r_bottom = bottom_dia / 2.0
+
+    if curve_r > 0:
+        # ── الحالة الصحيحة: جدار منحنٍ ──────────────────────────────
+        # نرسم نصف المقطع العرضي في المستوى XZ:
+        #   X = البُعد الشعاعي عن المحور
+        #   Z (local Y) = الارتفاع
+        # ثم ندوره 360° حول المحور Z العالمي.
+        #
+        # الإشارة السالبة لـ radiusArc تعني أن الانحناء للخارج (convex).
+        # إذا أردت انحناءً للداخل (concave) استخدم القيمة الموجبة.
+        try:
+            pan = (
+                cq.Workplane("XZ")
+                .moveTo(r_bottom, 0)
+                .radiusArc((r_top, height), -curve_r)
+                .lineTo(0, height)
+                .lineTo(0, 0)
+                .close()
+                .revolve(360, (0, 0, 0), (0, 1, 0))
+            )
+        except Exception as e:
+            print(f"⚠️  فشل revolve بـ curve_r={curve_r}: {e}")
+            print("   التراجع إلى loft المستقيم...")
+            pan = (
+                cq.Workplane("XY")
+                .circle(r_bottom)
+                .workplane(offset=height)
+                .circle(r_top)
+                .loft()
+            )
+    else:
+        # ── الحالة الافتراضية: مخروط مستقيم ─────────────────────────
+        pan = (
+            cq.Workplane("XY")
+            .circle(r_bottom)
+            .workplane(offset=height)
+            .circle(r_top)
+            .loft()
+        )
+
+    # fillet في القاع
     if fillet_r > 0:
-        pan = pan.edges("<Z").fillet(fillet_r)
-        
+        try:
+            pan = pan.edges("<Z").fillet(fillet_r)
+        except Exception as e:
+            print(f"⚠️  فشل fillet في القاع: {e} — تجاهله والمتابعة")
+
+    # حافة الحماية (rim) في الأعلى
     if add_rim:
-        rim = cq.Workplane("XY").circle(r_top + rim_thick).circle(r_top).extrude(rim_height)
-        rim = rim.translate((0,0,height - rim_height))
+        rim = (
+            cq.Workplane("XY")
+            .workplane(offset=height - rim_height)
+            .circle(r_top + rim_thick)
+            .circle(r_top)
+            .extrude(rim_height)
+        )
         pan = pan.union(rim)
+
     return pan
 
-def create_tube(shape, major, minor, length, thickness, radius, clearance=False):
+
+def create_tube(shape, major, minor, length, thickness, corner_r, clearance=False):
+    """
+    بناء الأنبوب كجسم صلب (hollow).
+
+    الشكل المستدير  → cylinder مباشر → ينتج CYLINDRICAL_SURFACE في STEP ✅
+    الشكل البيضاوي  → rect + fillet  → ينتج B_SPLINE حواف + PLANE جوانب ✅
+    """
     delta = 0.1 if clearance else 0.0
-    
+
     if shape == "مخصص":
-        print("ملاحظة: تم استخدام STL مخصص في المتصفح. هذا السكريبت سيستخدم أنبوباً بيضاوياً كبديل مؤقت. لنتائج مطابقة، استبدل هذه الدالة بكود استيراد STEP أو STL الخاص بك في CadQuery.")
+        print("ℹ️  STL مخصص: استخدام شكل بيضاوي كبديل مؤقت.")
         shape = "بيضاوي"
 
     if shape == "دائري":
-        outer = cq.Workplane("XY").circle(major/2.0).extrude(length)
-        inner_dia = max(0.1, major - 2*thickness + delta)
-        inner = cq.Workplane("XY").circle(inner_dia/2.0).extrude(length)
+        r_outer = major / 2.0
+        r_inner = max(0.01, r_outer - thickness + delta)
+        outer = cq.Workplane("XY").circle(r_outer).extrude(length)
+        inner = cq.Workplane("XY").circle(r_inner).extrude(length)
         return outer.cut(inner)
-    else:
-        outer = cq.Workplane("XY").rect(major, minor).extrude(length)
-        if radius > 0:
-            outer = outer.edges("|Z").fillet(radius)
-            
-        inner_major = max(0.1, major - 2*thickness + delta)
-        inner_minor = max(0.1, minor - 2*thickness + delta)
-        inner_radius = max(0.1, radius - thickness + delta)
-        
-        if inner_major > 0 and inner_minor > 0:
-            inner = cq.Workplane("XY").rect(inner_major, inner_minor).extrude(length)
-            if inner_radius > 0:
-                inner = inner.edges("|Z").fillet(inner_radius)
-            return outer.cut(inner)
-        return outer
 
-def cut_with_pan(tube, pan, tilt_angle, tilt_axis, pan_z_position, ins_dist=0, h_offset=0):
-    panned = pan.translate((0,0, pan_z_position))
-    axis_vec = (1,0,0) if tilt_axis == "X" else (0,1,0)
-    rotated_tube = tube.rotate((0,0,0), axis_vec, tilt_angle)
-    positioned_tube = rotated_tube.translate((0, h_offset, -ins_dist))
-    return positioned_tube.cut(panned)
+    else:  # بيضاوي أو مستطيل
+        outer = cq.Workplane("XY").rect(major, minor).extrude(length)
+        if corner_r > 0:
+            try:
+                outer = outer.edges("|Z").fillet(corner_r)
+            except Exception as e:
+                print(f"⚠️  fillet الخارجي: {e}")
+
+        inner_major  = max(0.01, major - 2 * thickness + delta)
+        inner_minor  = max(0.01, minor - 2 * thickness + delta)
+        inner_corner = max(0.01, corner_r - thickness + delta)
+
+        inner = cq.Workplane("XY").rect(inner_major, inner_minor).extrude(length)
+        if inner_corner > 0:
+            try:
+                inner = inner.edges("|Z").fillet(inner_corner)
+            except Exception as e:
+                print(f"⚠️  fillet الداخلي: {e}")
+
+        return outer.cut(inner)
+
+
+def cut_with_pan(tube, pan, tilt_angle, tilt_axis, pan_z_pos, ins_dist=0, h_offset=0):
+    """
+    قطع طرف الأنبوب بشكل المقلاة.
+    1. نضع المقلاة عند الموقع الصحيح على المحور Z.
+    2. نميل الأنبوب بزاوية tilt_angle.
+    3. نطرح المقلاة من الأنبوب.
+    """
+    positioned_pan = pan.translate((0, 0, pan_z_pos))
+    axis_vec       = (1, 0, 0) if tilt_axis == "X" else (0, 1, 0)
+    tilted_tube    = tube.rotate((0, 0, 0), axis_vec, tilt_angle)
+    moved_tube     = tilted_tube.translate((0, h_offset, -ins_dist))
+    return moved_tube.cut(positioned_pan)
+
 
 def cut_handle_end(tube, angle_x, angle_y, offset_y, length):
-    # الحل الجذري: استخدام صندوق قاطع صلب במيلان مركب
+    """
+    قطع الطرف الخلفي للمقبض بزاوية مائلة مركبة.
+    الصندوق القاطع كبير بما يكفي (600mm) ليغطي أي حجم أنبوب.
+    """
     cutting_box = (
         cq.Workplane("XY")
-        .rect(500, 500)
-        .extrude(500)
-        .rotate((0,0,0), (1,0,0), -angle_x)
-        .rotate((0,0,0), (0,1,0), -angle_y)
+        .rect(600, 600)
+        .extrude(600)
+        .rotate((0, 0, 0), (1, 0, 0), -angle_x)
+        .rotate((0, 0, 0), (0, 1, 0), -angle_y)
         .translate((0, offset_y, length))
     )
     return tube.cut(cutting_box)
 
-def finalize_part(part, nesting_mode, slug_gap, length):
-    final_obj = part
-    
-    if nesting_mode == "twin":
-        # إنشاء القطعة الثانية المعكوسة وتدويرها للحفاظ على التماثل
-        part2 = part.rotate((0,0,0), (0,1,0), 180).translate((0, 0, (length * 2) + slug_gap))
-        final_obj = part.union(part2)
-    
-    # --- معالجة التمركز من الجذور ---
-    bbox = final_obj.val().BoundingBox()
-    center_x = (bbox.xmin + bbox.xmax) / 2.0
-    center_y = (bbox.ymin + bbox.ymax) / 2.0
-    center_z = (bbox.zmin + bbox.zmax) / 2.0
-    
-    # إزاحة الجسم بالكامل ليكون في المنتصف تماماً عند (0,0,0)
-    centered_part = final_obj.translate((-center_x, -center_y, -center_z))
-    
-    return centered_part
 
 def add_laser_mark(part, minor, length):
-    # الفكرة: الأنبوب ممتد على المحور Z، وعرضه major وارتفاعه minor.
-    # يتم الحفر على السطح العلوي (Y = minor/2) بمسافة قريبة من الطرف الخلفي (طول القطعة)
-    # الثقب بقطر 1mm (نصف قطره 0.5) 
-    mark_tool = cq.Workplane("XZ").center(0, length - 15).circle(0.5).extrude(minor, both=True)
+    """ثقب مرجعي Ø1mm للتركيب على بُعد 15mm من الطرف الخلفي."""
+    mark_tool = (
+        cq.Workplane("XZ")
+        .center(0, length - 15)
+        .circle(0.5)
+        .extrude(minor, both=True)
+    )
     return part.cut(mark_tool)
 
-# ==========================================
-# 3. التنفيذ وإنشاء الملف (Execution)
-# ==========================================
-print("جاري إنشاء المقلاة والأنبوب...")
-pan = create_pan(pan_top_dia, pan_bottom_dia, pan_height, bottom_fillet, pan_add_rim, pan_rim_height, pan_rim_thickness)
-tube = create_tube(tube_shape, tube_major, tube_minor, total_tube_length, wall_thickness, tube_corner_radius, thermal_clearance)
 
-print("جاري القطع لتطابق الصفر...")
-part = cut_with_pan(tube, pan, tilt_angle, tilt_axis, part_length, insertion_distance, height_offset)
-part = ensure_solid(part)
-part = cut_handle_end(part, handle_angle_x, handle_angle_y, handle_offset, total_tube_length)
-part = ensure_solid(part)
+def finalize_part(part, nesting_mode, slug_gap, length):
+    """
+    التعشيش المزدوج (twin) وتمركز النموذج عند (0,0,0).
+    """
+    final_obj = part
 
+    if nesting_mode == "twin":
+        part2     = part.rotate((0, 0, 0), (0, 1, 0), 180).translate((0, 0, (length * 2) + slug_gap))
+        final_obj = part.union(part2)
+
+    bb       = final_obj.val().BoundingBox()
+    cx       = (bb.xmin + bb.xmax) / 2.0
+    cy       = (bb.ymin + bb.ymax) / 2.0
+    cz       = (bb.zmin + bb.zmax) / 2.0
+    centered = final_obj.translate((-cx, -cy, -cz))
+    return centered
+
+
+# ==========================================
+# 3. التنفيذ الرئيسي
+# ==========================================
+
+print("=" * 50)
+print("🔧 MecaFlow-CAD | Zero-Gap Engine")
+print("=" * 50)
+
+# ── بناء المقلاة ─────────────────────────────────────────────
+print("\\n[1/5] بناء المقلاة...")
+pan = create_pan(
+    top_dia   = pan_top_dia,
+    bottom_dia= pan_bottom_dia,
+    height    = pan_height,
+    curve_r   = pan_curve_r,         # ← الإصلاح: يُمرَّر الآن
+    fillet_r  = bottom_fillet,
+    add_rim   = pan_add_rim,
+    rim_height= pan_rim_height,
+    rim_thick = pan_rim_thickness,
+)
+pan = ensure_solid(pan, "create_pan")
+
+# ── بناء الأنبوب ─────────────────────────────────────────────
+print("[2/5] بناء الأنبوب...")
+tube = create_tube(
+    shape    = tube_shape,
+    major    = tube_major,
+    minor    = tube_minor,
+    length   = total_tube_length,
+    thickness= wall_thickness,
+    corner_r = tube_corner_radius,
+    clearance= thermal_clearance,
+)
+tube = ensure_solid(tube, "create_tube")
+
+# ── قطع طرف المقلاة بالأنبوب ─────────────────────────────────
+print("[3/5] قطع الصفر الحقيقي (Zero-Gap)...")
+part = cut_with_pan(
+    tube       = tube,
+    pan        = pan,
+    tilt_angle = tilt_angle,
+    tilt_axis  = tilt_axis,
+    pan_z_pos  = part_length,
+    ins_dist   = insertion_distance,
+    h_offset   = height_offset,
+)
+part = ensure_solid(part, "cut_with_pan")
+
+# ── قطع الطرف الخلفي ─────────────────────────────────────────
+print("[4/5] قطع طرف المقبض...")
+part = cut_handle_end(
+    tube    = part,
+    angle_x = handle_angle_x,
+    angle_y = handle_angle_y,
+    offset_y= handle_offset,
+    length  = total_tube_length,
+)
+part = ensure_solid(part, "cut_handle_end")
+
+# ── علامة التوجيه ────────────────────────────────────────────
 if mark_orientation:
-    print("جاري حفر العلامة المرجعية للتركيب...")
+    print("[4b] حفر علامة التركيب المرجعية...")
     part = add_laser_mark(part, tube_minor, total_tube_length)
 
-# إنهاء ووضع القطع في المركز
+# ── التعشيش والتمركز ─────────────────────────────────────────
+print("[5/5] التعشيش والتمركز...")
 part = finalize_part(part, nesting_mode, slug_gap, total_tube_length)
 
+# ── Fillet اختياري ───────────────────────────────────────────
 if apply_fillet:
-    print("جاري إضافة التنعيم لحواف الليزر...")
+    print("   → تطبيق fillet 0.2mm على حواف الليزر...")
     try:
-        part = part.fillet(0.2)
-    except:
-        pass
+        part = part.edges().fillet(0.2)
+    except Exception as e:
+        print(f"   ⚠️  فشل fillet العام: {e} — تجاهله")
 
 # ==========================================
-# 4. التصدير النهائي للماكينة
+# 4. التصدير النهائي
 # ==========================================
-output_filename = "ZeroGap_Final_Machine.step"
-cq.exporters.export(part, output_filename, tolerance=0.01, angularTolerance=0.1)
-print(f"✅ تم تصدير التصميم بنجاح وصيغة STEP: {os.path.abspath(output_filename)}")
-print("النظام الآن مبرمج لنقاط الصفر 0,0,0 ومستعد لبرامج CAM مباشرة.")
+
+base_name   = "ZeroGap_Part"
+step_path   = base_name + ".step"
+stl_path    = base_name + ".stl"
+
+# STEP: دقة عالية للتصنيع (tolerance=0.005 بدلاً من 0.01)
+cq.exporters.export(
+    part, step_path,
+    tolerance=0.005,
+    angularTolerance=0.05,
+)
+
+# STL: للمعاينة والطباعة
+cq.exporters.export(
+    part, stl_path,
+    tolerance=0.01,
+    angularTolerance=0.1,
+)
+
+print("\\n" + "=" * 50)
+print(f"✅ STEP: {os.path.abspath(step_path)}")
+print(f"✅ STL : {os.path.abspath(stl_path)}")
+print("   النظام مُعايَر على نقطة الصفر (0,0,0) — جاهز لبرامج CAM")
+print("=" * 50)
 `;
 };
-

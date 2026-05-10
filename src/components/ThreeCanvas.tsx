@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { OrbitControls, STLExporter, STLLoader } from 'three-stdlib';
 import { CSG } from 'three-csg-ts';
 import { ZeroGapState } from '../types';
 import { validateTubeConfig, validatePanConfig } from '../lib/validators';
 import { performanceOptimizer } from '../lib/performanceOptimizer';
+import { ViewportGizmo } from './ViewportGizmo';
 
 interface ThreeCanvasProps {
   config: ZeroGapState;
@@ -138,9 +140,27 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
     scene.add(new THREE.AxesHelper(100));
 
     // Animation loop
+    const clock = new THREE.Clock();
     let animId: number;
     const animate = () => {
       animId = requestAnimationFrame(animate);
+      const time = clock.getElapsedTime() * 3;
+
+      // Pulsing glow for green penetration zone
+      const glowObj = scene.getObjectByName('zerogap_intersection_zone');
+      if (glowObj && glowObj instanceof THREE.Mesh) {
+        const mat = glowObj.material as THREE.MeshStandardMaterial;
+        mat.emissiveIntensity = 1.0 + Math.sin(time) * 1.0;
+        mat.opacity = 0.3 + Math.sin(time) * 0.15;
+      }
+
+      // Subtle pulse for the pan contact ring (now a Mesh, not LineSegments)
+      const ringObj = scene.getObjectByName('zerogap_pan_ring');
+      if (ringObj && ringObj instanceof THREE.Mesh) {
+        const mat = ringObj.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.8 + Math.sin(time * 1.5) * 0.15;
+      }
+
       controls.update();
       renderer!.render(scene, camera);
       performanceOptimizer.measureFPS();
@@ -209,84 +229,109 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
       exportMeshRef.current = null;
 
       try {
-        // ── 1. Pan (virtual cutter) ──────────────────────────────────────────
-        const rBottom = config.pan.bottomDiameter / 2;
-        const rTop = config.pan.topDiameter / 2;
+        // ── 1. Pan — Solid + Shell (hollow with wall thickness) ───────────
+        const wt = config.pan.wallThickness || 2.0;
+
+        // Inner Mold Mode: user measured the mold (inner surface)
+        // → add wallThickness outward to get the real outer dimensions
+        const rBottom = config.pan.innerMoldMode
+          ? config.pan.bottomDiameter / 2 + wt
+          : config.pan.bottomDiameter / 2;
+        const rTop = config.pan.innerMoldMode
+          ? config.pan.topDiameter / 2 + wt
+          : config.pan.topDiameter / 2;
         const panH = config.pan.height;
         const rimThick = config.pan.rimThickness || 2.0;
-        const curveRad = config.pan.curveRadius || 100.0;
+        const curveRad = config.pan.curveRadius ?? 100.0;
         const filletR = config.pan.bottomFilletRadius || 8.0;
         const addRim = config.pan.addRim;
         const rimH = config.pan.rimHeight || 3.0;
 
-        const pts: THREE.Vector2[] = [];
-        pts.push(new THREE.Vector2(0, 0));
-
-        // Bottom fillet arc
-        if (filletR > 0) {
-          const segs = 16;
-          for (let i = 0; i <= segs; i++) {
-            const theta = (Math.PI / 2) * (1 - i / segs);
-            pts.push(new THREE.Vector2(
-              rBottom - filletR + filletR * Math.cos(theta),
-              filletR - filletR * Math.sin(theta)
-            ));
+        // Helper: build a lathe profile for a pan given a radius offset
+        const buildPanProfile = (rOff: number): THREE.Vector2[] => {
+          const rb = Math.max(1, rBottom - rOff);
+          const rt = Math.max(1, rTop - rOff);
+          const fR = Math.max(0, filletR - rOff);
+          const p: THREE.Vector2[] = [];
+          if (!config.pan.removeBottom) {
+            p.push(new THREE.Vector2(0, rOff > 0 ? wt : 0));
           }
-        } else {
-          pts.push(new THREE.Vector2(rBottom, 0));
-        }
 
-        // Quadratic bezier side wall
-        const bulge = Math.max(2.0, Math.min(20.0, (200.0 / curveRad) * 4.0));
-        const rMid = (rBottom + rTop) / 2.0 + bulge;
-        const zMid = panH / 2.0;
-        const cx = 2 * rMid - 0.5 * rBottom - 0.5 * rTop;
-        const cy = 2 * zMid - 0.5 * filletR - 0.5 * panH;
-        const curve = new THREE.QuadraticBezierCurve(
-          new THREE.Vector2(rBottom, filletR),
-          new THREE.Vector2(cx, cy),
-          new THREE.Vector2(rTop, panH)
-        );
-        pts.push(...curve.getPoints(32).slice(1));
+          // Bottom fillet arc
+          if (fR > 0) {
+            const segs = 16;
+            for (let i = 0; i <= segs; i++) {
+              const theta = (Math.PI / 2) * (1 - i / segs);
+              p.push(new THREE.Vector2(
+                rb - fR + fR * Math.cos(theta),
+                (rOff > 0 ? wt : 0) + fR - fR * Math.sin(theta)
+              ));
+            }
+          } else {
+            p.push(new THREE.Vector2(rb, rOff > 0 ? wt : 0));
+          }
 
-        // Rim / top close
-        if (addRim) {
-          pts.push(new THREE.Vector2(rTop + rimThick, panH));
-          pts.push(new THREE.Vector2(rTop + rimThick, panH + rimH));
-          pts.push(new THREE.Vector2(0, panH + rimH));
-        } else {
-          pts.push(new THREE.Vector2(rTop + rimThick, panH));
-          pts.push(new THREE.Vector2(rTop + rimThick, panH + rimThick));
-          pts.push(new THREE.Vector2(0, panH + rimThick));
-        }
+          // Quadratic bezier side wall
+          const startZ = (rOff > 0 ? wt : 0) + fR;
+          // Only apply bulge reduction for profiles that represent real wall surfaces (rOff >= wt)
+          // For the thin "skin" slices (rOff < wt, e.g. 0.5mm), keep bulge identical to outer
+          const bulgeReduction = rOff >= wt ? rOff * 0.3 : 0;
+          const bulge = Math.max(1.0, Math.min(20.0, (200.0 / curveRad) * 4.0) - bulgeReduction);
+          const rM = (rb + rt) / 2.0 + bulge;
+          const zM = (startZ + panH) / 2.0;
+          const cpx = 2 * rM - 0.5 * rb - 0.5 * rt;
+          const cpy = 2 * zM - 0.5 * startZ - 0.5 * panH;
+          const c = new THREE.QuadraticBezierCurve(
+            new THREE.Vector2(rb, startZ),
+            new THREE.Vector2(cpx, cpy),
+            new THREE.Vector2(rt, panH)
+          );
+          p.push(...c.getPoints(32).slice(1));
 
-        // Deduplicate consecutive identical points
-        const finalPts = pts.filter((p, i) => i === 0 || !p.equals(pts[i - 1]));
+          // Rim / top close
+          if (addRim && rOff === 0) {
+            p.push(new THREE.Vector2(rt + rimThick, panH));
+            p.push(new THREE.Vector2(rt + rimThick, panH + rimH));
+            p.push(new THREE.Vector2(0, panH + rimH));
+          } else {
+            p.push(new THREE.Vector2(rt + (rOff === 0 ? rimThick : 0), panH));
+            p.push(new THREE.Vector2(0, panH));
+          }
 
-        const panGeom = new THREE.LatheGeometry(finalPts, 64);
+          // Deduplicate
+          return p.filter((pt, i) => i === 0 || !pt.equals(p[i - 1]));
+        };
+
+        // Outer profile (full solid pan — used for CSG cut)
+        const outerPts = buildPanProfile(0);
+        const panGeom = new THREE.LatheGeometry(outerPts, 64);
         const panMesh = new THREE.Mesh(panGeom, new THREE.MeshStandardMaterial({
           color: 0xff3333,
           side: THREE.DoubleSide
         }));
         panMesh.name = 'zerogap_pan';
 
-        // Wireframe overlay — visible ONLY in preview mode as engineering reference.
-        // In boolean (Zero-Gap) mode the user sees only the final subtracted result.
-        const panWf = new THREE.Mesh(panGeom, new THREE.MeshBasicMaterial({
-          color: 0x00E5FF,
-          wireframe: true,
-          transparent: true,
-          opacity: 0.35
+        // Inner profile (for shell visualization)
+        const innerPts = buildPanProfile(wt);
+        const panInnerGeom = new THREE.LatheGeometry(innerPts, 64);
+        const panInnerMesh = new THREE.Mesh(panInnerGeom, new THREE.MeshStandardMaterial({
+          color: 0xff3333, side: THREE.DoubleSide
         }));
-        panWf.name = 'zerogap_pan_wireframe';
-        if (config.renderMode === 'preview') {
-          scene.add(panWf);
-        }
+        panInnerMesh.name = 'zerogap_pan_inner';
 
-        // ── 2. Tube (main body) ──────────────────────────────────────────────
+        // NOTE: panWf was removed; the preview section (below) creates
+        // properly positioned wireframe meshes directly.
+
+        // ── 2. Tube — 3-Part Logic (Head / Body / Tail) ─────────────────────
+        // HEAD: fixed zone that gets cut by the pan (ensures angle stability)
+        // BODY: variable-length straight section
+        // TAIL: fixed zone at handle end (gets cut by handle cutter)
         const tw = config.tube.width;
         const th = config.tube.shape === 'دائري' ? tw : config.tube.height;
         const tl = config.tube.totalLength;
+        const HEAD_LEN = Math.min(config.tube.partLength + 20, tl * 0.4);
+        const TAIL_LEN = Math.min(30, tl * 0.2);
+        const BODY_LEN = Math.max(1, tl - HEAD_LEN - TAIL_LEN);
         let tubeGeom: THREE.BufferGeometry;
 
         if (config.tube.shape === 'مخصص' && config.tube.customStlBuffer) {
@@ -299,52 +344,71 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
           const tr = config.tube.shape === 'دائري' ? tw / 2 : config.tube.cornerRadius;
           const clearance = config.thermalClearance ? 0.1 : 0;
 
-          const outerShape = new THREE.Shape();
-          const tx = -tw / 2, ty = -th / 2;
-          if (tr > 0) {
-            outerShape.moveTo(tx + tr, ty);
-            outerShape.lineTo(tx + tw - tr, ty);
-            outerShape.quadraticCurveTo(tx + tw, ty, tx + tw, ty + tr);
-            outerShape.lineTo(tx + tw, ty + th - tr);
-            outerShape.quadraticCurveTo(tx + tw, ty + th, tx + tw - tr, ty + th);
-            outerShape.lineTo(tx + tr, ty + th);
-            outerShape.quadraticCurveTo(tx, ty + th, tx, ty + th - tr);
-            outerShape.lineTo(tx, ty + tr);
-            outerShape.quadraticCurveTo(tx, ty, tx + tr, ty);
-          } else {
-            outerShape.moveTo(tx, ty);
-            outerShape.lineTo(tx + tw, ty);
-            outerShape.lineTo(tx + tw, ty + th);
-            outerShape.lineTo(tx, ty + th);
-            outerShape.lineTo(tx, ty);
-          }
-
-          const etl = tt - clearance;
-          const itr = Math.max(0, tr - etl);
-          const itx = tx + etl, ity = ty + etl;
-          const itw = tw - 2 * etl, ith = th - 2 * etl;
-          if (itw > 0 && ith > 0) {
-            const hole = new THREE.Path();
-            if (itr > 0) {
-              hole.moveTo(itx + itr, ity);
-              hole.lineTo(itx + itw - itr, ity);
-              hole.quadraticCurveTo(itx + itw, ity, itx + itw, ity + itr);
-              hole.lineTo(itx + itw, ity + ith - itr);
-              hole.quadraticCurveTo(itx + itw, ity + ith, itx + itw - itr, ity + ith);
-              hole.lineTo(itx + itr, ity + ith);
-              hole.quadraticCurveTo(itx, ity + ith, itx, ity + ith - itr);
-              hole.lineTo(itx, ity + itr);
-              hole.quadraticCurveTo(itx, ity, itx + itr, ity);
+          // Cross-section shape (shared between all 3 parts)
+          const buildSection = (): THREE.Shape => {
+            const outerShape = new THREE.Shape();
+            const tx = -tw / 2, ty = -th / 2;
+            if (tr > 0) {
+              outerShape.moveTo(tx + tr, ty);
+              outerShape.lineTo(tx + tw - tr, ty);
+              outerShape.quadraticCurveTo(tx + tw, ty, tx + tw, ty + tr);
+              outerShape.lineTo(tx + tw, ty + th - tr);
+              outerShape.quadraticCurveTo(tx + tw, ty + th, tx + tw - tr, ty + th);
+              outerShape.lineTo(tx + tr, ty + th);
+              outerShape.quadraticCurveTo(tx, ty + th, tx, ty + th - tr);
+              outerShape.lineTo(tx, ty + tr);
+              outerShape.quadraticCurveTo(tx, ty, tx + tr, ty);
             } else {
-              hole.moveTo(itx, ity);
-              hole.lineTo(itx + itw, ity);
-              hole.lineTo(itx + itw, ity + ith);
-              hole.lineTo(itx, ity + ith);
-              hole.lineTo(itx, ity);
+              outerShape.moveTo(tx, ty);
+              outerShape.lineTo(tx + tw, ty);
+              outerShape.lineTo(tx + tw, ty + th);
+              outerShape.lineTo(tx, ty + th);
+              outerShape.lineTo(tx, ty);
             }
-            outerShape.holes.push(hole);
+            const etl = tt - clearance;
+            const itr = Math.max(0, tr - etl);
+            const itx = tx + etl, ity = ty + etl;
+            const itw = tw - 2 * etl, ith = th - 2 * etl;
+            if (itw > 0 && ith > 0) {
+              const hole = new THREE.Path();
+              if (itr > 0) {
+                hole.moveTo(itx + itr, ity);
+                hole.lineTo(itx + itw - itr, ity);
+                hole.quadraticCurveTo(itx + itw, ity, itx + itw, ity + itr);
+                hole.lineTo(itx + itw, ity + ith - itr);
+                hole.quadraticCurveTo(itx + itw, ity + ith, itx + itw - itr, ity + ith);
+                hole.lineTo(itx + itr, ity + ith);
+                hole.quadraticCurveTo(itx, ity + ith, itx, ity + ith - itr);
+                hole.lineTo(itx, ity + itr);
+                hole.quadraticCurveTo(itx, ity, itx + itr, ity);
+              } else {
+                hole.moveTo(itx, ity);
+                hole.lineTo(itx + itw, ity);
+                hole.lineTo(itx + itw, ity + ith);
+                hole.lineTo(itx, ity + ith);
+                hole.lineTo(itx, ity);
+              }
+              outerShape.holes.push(hole);
+            }
+            return outerShape;
+          };
+
+          // Build 3 segments offset on Z, then merge
+          const headGeom = new THREE.ExtrudeGeometry(buildSection(), { depth: HEAD_LEN, bevelEnabled: false, curveSegments: 16 });
+          const bodyGeom = new THREE.ExtrudeGeometry(buildSection(), { depth: BODY_LEN, bevelEnabled: false, curveSegments: 16 });
+          bodyGeom.translate(0, 0, HEAD_LEN);
+          const tailGeom = new THREE.ExtrudeGeometry(buildSection(), { depth: TAIL_LEN, bevelEnabled: false, curveSegments: 16 });
+          tailGeom.translate(0, 0, HEAD_LEN + BODY_LEN);
+
+          try {
+            tubeGeom = BufferGeometryUtils.mergeGeometries([headGeom, bodyGeom, tailGeom], false);
+          } catch {
+            // Fallback to single extrude if merge fails
+            tubeGeom = new THREE.ExtrudeGeometry(buildSection(), { depth: tl, bevelEnabled: false, curveSegments: 16 });
           }
-          tubeGeom = new THREE.ExtrudeGeometry(outerShape, { depth: tl, bevelEnabled: false, curveSegments: 16 });
+          headGeom.dispose();
+          bodyGeom.dispose();
+          tailGeom.dispose();
         }
 
         const tubeMesh = new THREE.Mesh(tubeGeom, new THREE.MeshStandardMaterial({
@@ -371,9 +435,9 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
         // Pan sits at partLength on Z
         panMesh.position.set(0, 0, config.tube.partLength);
         panMesh.updateMatrixWorld(true);
-        panWf.position.copy(panMesh.position);
-        panWf.rotation.copy(panMesh.rotation);
-        panWf.updateMatrixWorld(true);
+        panInnerMesh.position.copy(panMesh.position);
+        panInnerMesh.rotation.copy(panMesh.rotation);
+        panInnerMesh.updateMatrixWorld(true);
 
         // Tube positioned and tilted
         tubeMesh.position.set(0, config.assembly.heightOffset, -config.assembly.insertionDistance);
@@ -387,6 +451,106 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
         // ── 5. Render: Preview or Boolean ────────────────────────────────────
         if (config.renderMode === 'preview') {
           tubeMesh.name = 'zerogap_tube_preview';
+
+          // ── Pan wireframe rendering ──────────────────────────────────────
+          // Outer pan: cyan wireframe (always visible)
+          const panOuterWf = new THREE.Mesh(panGeom, new THREE.MeshBasicMaterial({
+            color: 0x00E5FF, wireframe: true, transparent: true, opacity: 0.35
+          }));
+          panOuterWf.name = 'zerogap_pan_outer_wf';
+          panOuterWf.position.copy(panMesh.position);
+          panOuterWf.rotation.copy(panMesh.rotation);
+          scene.add(panOuterWf);
+
+          // Inner pan: orange wireframe (only in shell mode)
+          if (config.pan.useShellPreview) {
+            const panInnerWf = new THREE.Mesh(panInnerGeom, new THREE.MeshBasicMaterial({
+              color: 0xFFA500, wireframe: true, transparent: true, opacity: 0.25
+            }));
+            panInnerWf.name = 'zerogap_pan_inner_wf';
+            panInnerWf.position.copy(panMesh.position);
+            panInnerWf.rotation.copy(panMesh.rotation);
+            scene.add(panInnerWf);
+          }
+
+          // ── Zero-Gap Visual Feedback ──────────────────────────────────────
+          try {
+            const tubeBSP = CSG.fromMesh(tubeMesh);
+            const panBSP  = CSG.fromMesh(panMesh);
+            const intersectBSP = tubeBSP.intersect(panBSP);
+
+            if (intersectBSP) {
+              // 1. Penetrating tube end — colored GREEN GLOW (for future use/reference)
+              if (config.showGlow) {
+                const glowMesh = CSG.toMesh(intersectBSP, new THREE.Matrix4(), new THREE.MeshStandardMaterial({
+                  color: 0x00ff00,
+                  emissive: 0x00aa00,
+                  emissiveIntensity: 1.5,
+                  transparent: true,
+                  opacity: 0.4,
+                  side: THREE.DoubleSide,
+                  depthTest: true,
+                  depthWrite: false
+                }));
+                glowMesh.name = 'zerogap_intersection_zone';
+                scene.add(glowMesh);
+              }
+
+              // 2. RED contact ring on PAN OUTER SURFACE only
+              if (config.showBorders) {
+                try {
+                  // Create a 0.5mm outer "skin" of the pan so the ring only exists on the outer surface
+                  const skinPts = buildPanProfile(0.5);
+                  const skinGeom = new THREE.LatheGeometry(skinPts, 64);
+                  const skinMesh = new THREE.Mesh(skinGeom);
+                  skinMesh.position.copy(panMesh.position);
+                  skinMesh.rotation.copy(panMesh.rotation);
+                  skinMesh.updateMatrixWorld(true);
+                  
+                  const skinBSP = panBSP.subtract(CSG.fromMesh(skinMesh));
+                  const outerRingBSP = tubeBSP.intersect(skinBSP);
+                  
+                  if (outerRingBSP) {
+                    // Render the 0.5mm skin plug as a solid Red mesh, creating a thick 3D ring!
+                    const ringMesh = CSG.toMesh(outerRingBSP, new THREE.Matrix4(), new THREE.MeshBasicMaterial({
+                      color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.95
+                    }));
+                    ringMesh.name = 'zerogap_pan_ring';
+                    ringMesh.renderOrder = 1;
+                    scene.add(ringMesh);
+                  }
+                  skinGeom.dispose();
+                } catch (e) { console.warn('Outer ring failed:', e); }
+
+                // BLUE inner ring — only when tube pierces through full wall thickness
+                if (config.pan.useShellPreview) {
+                  try {
+                    const panInnerBSP = CSG.fromMesh(panInnerMesh);
+                    const innerIntersectBSP = tubeBSP.intersect(panInnerBSP);
+                    if (innerIntersectBSP) {
+                      const innerMesh = CSG.toMesh(innerIntersectBSP, new THREE.Matrix4());
+                      if (innerMesh.geometry.attributes.position && innerMesh.geometry.attributes.position.count > 3) {
+                        const innerEdges = new THREE.EdgesGeometry(innerMesh.geometry, 15);
+                        const innerRing = new THREE.LineSegments(innerEdges, new THREE.LineBasicMaterial({
+                          color: 0x00aaff, linewidth: 3, transparent: true, opacity: 1.0,
+                          depthTest: true
+                        }));
+                        innerRing.name = 'zerogap_pan_inner_ring';
+                        innerRing.renderOrder = 1;
+                        (innerRing.material as THREE.LineBasicMaterial).polygonOffset = true;
+                        (innerRing.material as THREE.LineBasicMaterial).polygonOffsetFactor = -5;
+                        scene.add(innerRing);
+                      }
+                      innerMesh.geometry.dispose();
+                    }
+                  } catch (e) { console.warn('Inner ring failed:', e); }
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('Zero-Gap visual calculation error:', err);
+          }
+
           try {
             const edges = new THREE.EdgesGeometry(tubeGeom);
             if (edges.attributes.position?.count > 0) {
@@ -400,14 +564,26 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
           scene.add(hcMesh);
           exportMeshRef.current = tubeMesh;
 
+          // Dispose temp geometries that are NOT used by scene meshes
+          // (panGeom/panInnerGeom are used by wireframe meshes in the scene,
+          //  but panMesh/panInnerMesh themselves are never added to scene)
+          // Note: scene wireframes share panGeom/panInnerGeom — they will be
+          // disposed via disposeDeep on next rebuild. Only dispose hidden meshes' materials.
+          (panMesh.material as THREE.Material).dispose();
+          (panInnerMesh.material as THREE.Material).dispose();
+          hcGeom.dispose();
+
         } else {
           // ── CSG Boolean subtraction ─────────────────────────────────────
           setIsLoading(true);
           const tubeBSP = CSG.fromMesh(tubeMesh);
-          const panBSP  = CSG.fromMesh(panMesh);
+          // If applyThicknessToCut: use inner pan (shell gap), else use solid
+          const cutPanBSP = config.pan.applyThicknessToCut
+            ? CSG.fromMesh(panInnerMesh)  // Cut using inner surface only
+            : CSG.fromMesh(panMesh);      // Cut using full solid (default)
           const hcBSP   = CSG.fromMesh(hcMesh);
 
-          let resultBSP = tubeBSP.subtract(panBSP).subtract(hcBSP);
+          let resultBSP = tubeBSP.subtract(cutPanBSP).subtract(hcBSP);
 
           // Optional laser orientation mark
           if (config.markOrientation) {
@@ -647,6 +823,10 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
         <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-500/90 text-white px-4 py-2 rounded-lg text-xs font-bold z-50 animate-pulse">
           {engineError}
         </div>
+      )}
+      {/* Orientation Gizmo — bottom-right corner */}
+      {!webglError && (
+        <ViewportGizmo cameraRef={cameraRef} />
       )}
     </div>
   );

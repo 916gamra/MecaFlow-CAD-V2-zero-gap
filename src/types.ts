@@ -1,4 +1,4 @@
-import { Vector3, Euler } from 'three';
+// Types for MecaFlow CAD
 
 export type PartType = 'block' | 'cylinder' | 'hex_nut' | 'hole_block' | 'hole_cylinder';
 
@@ -15,14 +15,19 @@ export interface CADPart {
 }
 
 export interface PanConfig {
-  bottomDiameter: number; 
-  topDiameter: number;    
-  height: number;         
-  curveRadius: number;   
+  bottomDiameter: number;
+  topDiameter: number;
+  height: number;
+  curveRadius: number;
   rimThickness: number;
   bottomFilletRadius: number;
+  removeBottom?: boolean;       // إزالة القاع
   addRim: boolean;
   rimHeight: number;
+  wallThickness: number;        // سمك المعدن (mm)
+  useShellPreview: boolean;     // عرض المقلاة كجسم مجوف
+  innerMoldMode: boolean;       // القياسات تمثل القالب الداخلي
+  applyThicknessToCut: boolean; // تطبيق السمك على عملية القطع
 }
 
 export interface TubeConfig {
@@ -57,6 +62,8 @@ export interface ZeroGapState {
   nestingMode: 'single' | 'twin';
   slugGap: number;
   markOrientation: boolean;
+  showGlow: boolean;
+  showBorders: boolean;
 }
 
 export interface CADState {

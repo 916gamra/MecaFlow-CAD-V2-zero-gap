@@ -17,7 +17,7 @@ export default function App() {
   }, []);
 
   const defaultZeroGap: CADState['zeroGap'] = {
-    pan: { bottomDiameter: 120, topDiameter: 280, height: 50, curveRadius: 100, rimThickness: 2, bottomFilletRadius: 8, addRim: true, rimHeight: 3 },
+    pan: { bottomDiameter: 120, topDiameter: 280, height: 50, curveRadius: 100, rimThickness: 2, bottomFilletRadius: 8, removeBottom: false, addRim: true, rimHeight: 3, wallThickness: 2.0, useShellPreview: true, innerMoldMode: false, applyThicknessToCut: false },
     tube: { width: 38, height: 25, thickness: 1.2, totalLength: 120, partLength: 70, cornerRadius: 5.75, shape: 'بيضاوي' },
     assembly: { tiltAngle: 15, handleAngleX: 0, handleAngleY: 10, handleOffset: 0, insertionDistance: 50, heightOffset: 25, tiltAxis: 'X' },
     renderMode: 'boolean',
@@ -25,7 +25,9 @@ export default function App() {
     thermalClearance: false,
     nestingMode: 'twin',
     slugGap: 5,
-    markOrientation: false
+    markOrientation: false,
+    showGlow: true,
+    showBorders: true
   };
 
   const [state, setState] = useState<CADState>(() => {
@@ -107,7 +109,7 @@ export default function App() {
               />
             )}
             {state.viewMode === 'drafting' && (
-              <DraftingView />
+              <DraftingView config={state.zeroGap} />
             )}
             {state.viewMode === 'cnc' && (
               <CNCView config={state.zeroGap} />

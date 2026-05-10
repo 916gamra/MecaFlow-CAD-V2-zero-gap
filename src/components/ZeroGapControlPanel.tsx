@@ -2,8 +2,6 @@ import React from 'react';
 import { ZeroGapState } from '../types';
 import { generateCadQueryScript } from '../lib/exportUtils';
 import { generateGcode } from '../lib/gcodeGenerator';
-import { STLExporter } from 'three-stdlib';
-import * as THREE from 'three';
 
 interface ControlPanelProps {
   config: ZeroGapState;
@@ -144,15 +142,52 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({ config, onUpdate, on
           {renderSlider('قوس القاع (Fillet)', config.pan.bottomFilletRadius, v => updatePan('bottomFilletRadius', v), 0, 30, 0.5)}
           
           <button 
+            onClick={() => onUpdate({ ...config, pan: { ...config.pan, removeBottom: !config.pan.removeBottom } })}
+            className={`w-full py-2 mb-2 text-[10px] font-bold uppercase border border-[var(--border)] rounded flex items-center justify-between px-3 ${config.pan.removeBottom ? 'bg-[var(--accent)]/10 text-[var(--accent)] border-[var(--accent)]' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
+          >
+            <span>إزالة قاع المقلاة (Remove Bottom)</span>
+            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${config.pan.removeBottom ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`} />
+          </button>
+
+          <button
             onClick={() => onUpdate({ ...config, pan: { ...config.pan, addRim: !config.pan.addRim } })}
             className={`w-full py-2 mb-2 text-[10px] font-bold uppercase border border-[var(--border)] rounded flex items-center justify-between px-3 ${config.pan.addRim ? 'bg-[var(--accent)]/10 text-[var(--accent)] border-[var(--accent)]' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
           >
             <span>إضافة حافة علوية (Rim)</span>
-            <div className={`w-3 h-3 rounded-full ${config.pan.addRim ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`} />
+            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${config.pan.addRim ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`} />
           </button>
           
           {config.pan.addRim && renderSlider('ارتفاع الحافة العلوية', config.pan.rimHeight, v => updatePan('rimHeight', v), 1, 20, 0.5)}
           {config.pan.addRim && renderSlider('سماكة الحافة العلوية', config.pan.rimThickness, v => updatePan('rimThickness', v), 0, 10, 0.5)}
+        </section>
+
+        {/* Shell Physics */}
+        <section className="mb-6 border-b border-[var(--border)] pb-2">
+          <label className="block text-[10px] font-bold text-amber-400 uppercase mb-3 text-right">فيزياء المقلاة (Shell)</label>
+          {renderSlider('سمك المعدن (mm)', config.pan.wallThickness, v => updatePan('wallThickness', v), 0.5, 10, 0.1)}
+          <div className="flex flex-col gap-2 mt-2">
+            <button
+              onClick={() => onUpdate({ ...config, pan: { ...config.pan, useShellPreview: !config.pan.useShellPreview } })}
+              className={`w-full py-2 text-[10px] font-bold uppercase border border-[var(--border)] rounded flex items-center justify-between px-3 ${config.pan.useShellPreview ? 'bg-amber-500/15 text-amber-400 border-amber-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
+            >
+              <span>عرض مجوّف (Shell)</span>
+              <div className={`w-3 h-3 rounded-full ${config.pan.useShellPreview ? 'bg-amber-400' : 'bg-[var(--border)]'}`} />
+            </button>
+            <button
+              onClick={() => onUpdate({ ...config, pan: { ...config.pan, innerMoldMode: !config.pan.innerMoldMode } })}
+              className={`w-full py-2 text-[10px] font-bold uppercase border border-[var(--border)] rounded flex items-center justify-between px-3 ${config.pan.innerMoldMode ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
+            >
+              <span>قياسات القالب الداخلي</span>
+              <div className={`w-3 h-3 rounded-full ${config.pan.innerMoldMode ? 'bg-cyan-400' : 'bg-[var(--border)]'}`} />
+            </button>
+            <button
+              onClick={() => onUpdate({ ...config, pan: { ...config.pan, applyThicknessToCut: !config.pan.applyThicknessToCut } })}
+              className={`w-full py-2 text-[10px] font-bold uppercase border border-[var(--border)] rounded flex items-center justify-between px-3 ${config.pan.applyThicknessToCut ? 'bg-red-500/15 text-red-400 border-red-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
+            >
+              <span>تطبيق السمك على القطع</span>
+              <div className={`w-3 h-3 rounded-full ${config.pan.applyThicknessToCut ? 'bg-red-400' : 'bg-[var(--border)]'}`} />
+            </button>
+          </div>
         </section>
 
         {/* Tube Parameters */}
@@ -177,16 +212,26 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({ config, onUpdate, on
 
           {config.tube.shape === 'مخصص' && (
             <div className="mb-4 bg-white/5 p-3 rounded border border-[var(--accent)]/50 text-center">
-              <label className="cursor-pointer inline-block px-3 py-1 bg-[var(--accent)]/80 hover:bg-[var(--accent)] text-white rounded text-[10px] uppercase font-bold transition-colors">
-                {config.tube.customStlName ? `تم تحميل: ${config.tube.customStlName}` : 'اختيار ملف STL'}
-                <input type="file" accept=".stl" className="hidden" onChange={async (e) => {
-                  if (e.target.files && e.target.files.length > 0) {
-                    const file = e.target.files[0];
-                    const buffer = await file.arrayBuffer();
-                    onUpdate({ ...config, tube: { ...config.tube, shape: 'مخصص', customStlBuffer: buffer, customStlName: file.name } });
-                  }
-                }}/>
-              </label>
+              <div className="flex flex-col items-center justify-center gap-2">
+                <label className="cursor-pointer inline-block px-3 py-1 bg-[var(--accent)]/80 hover:bg-[var(--accent)] text-white rounded text-[10px] uppercase font-bold transition-colors">
+                  {config.tube.customStlName ? `تغيير الملف: ${config.tube.customStlName}` : 'اختيار ملف STL'}
+                  <input type="file" accept=".stl" className="hidden" onChange={async (e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      const file = e.target.files[0];
+                      const buffer = await file.arrayBuffer();
+                      onUpdate({ ...config, tube: { ...config.tube, shape: 'مخصص', customStlBuffer: buffer, customStlName: file.name } });
+                    }
+                  }}/>
+                </label>
+                {config.tube.customStlName && (
+                  <button 
+                    onClick={() => onUpdate({ ...config, tube: { ...config.tube, customStlBuffer: undefined, customStlName: undefined } })}
+                    className="px-3 py-1 bg-red-900/50 hover:bg-red-900 text-red-200 rounded text-[10px] uppercase font-bold transition-colors text-xs border border-red-800"
+                  >
+                    مسح (Clear STL)
+                  </button>
+                )}
+              </div>
               <p className="text-[9px] text-[var(--accent)] mt-2">ملاحظة: سيتم توسيط ودمج هندسة الـ STL لمحاكاتها وقطعها</p>
             </div>
           )}
@@ -216,7 +261,7 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({ config, onUpdate, on
                onClick={() => onUpdate({ ...config, nestingMode: 'twin' })}
              >قطعتان متعاكستان</button>
            </div>
-           {config.nestingMode === 'twin' && renderSlider('خلوص الفاصل (Slug Gap)', config.slugGap, v => onUpdate({ ...config, slugGap: parseFloat(v) || 0 }), 0, 20, 0.5)}
+           {config.nestingMode === 'twin' && renderSlider('خلوص الفاصل (Slug Gap)', config.slugGap, v => onUpdate({ ...config, slugGap: v }), 0, 20, 0.5)}
            {config.nestingMode === 'twin' && (
              <div className="mt-3 bg-[#13151a] border border-green-500/30 rounded p-3 flex flex-col items-center">
                <span className="text-[10px] text-[var(--text-dim)] mb-1">حجم الوفر في الخامات (Estimated Scrap Saved)</span>
@@ -242,11 +287,32 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({ config, onUpdate, on
              >محور Y</button>
            </div>
           {renderSlider('زاوية ميلان المقلاة', config.assembly.tiltAngle, v => updateAssembly('tiltAngle', v), -90, 90)}
-          {renderSlider('زاوية المقبض X', config.assembly.handleAngleX, v => updateAssembly('handleAngleX', v), -45, 45)}
+        {renderSlider('زاوية المقبض X', config.assembly.handleAngleX, v => updateAssembly('handleAngleX', v), -45, 45)}
           {renderSlider('زاوية المقبض Y', config.assembly.handleAngleY, v => updateAssembly('handleAngleY', v), -45, 45)}
           {renderSlider('تشفيت القطع (Z-Offset)', config.assembly.handleOffset, v => updateAssembly('handleOffset', v), -50, 50)}
           {renderSlider('الارتفاع من القاع', config.assembly.heightOffset, v => updateAssembly('heightOffset', v), 0, 150)}
           {renderSlider('مسافة الاختراق', config.assembly.insertionDistance, v => updateAssembly('insertionDistance', v), 0, 150)}
+        </section>
+
+        {/* Visual Feedback Controls */}
+        <section className="mt-4 pb-4 border-b border-[var(--border)]">
+          <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3 text-right">المعايير البصرية (Visuals)</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => onUpdate({ ...config, showBorders: !config.showBorders })}
+              className={`py-2 text-[8px] font-bold uppercase border border-[var(--border)] rounded flex flex-col items-center justify-center gap-1 ${config.showBorders ? 'bg-purple-600/20 text-purple-400 border-purple-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
+            >
+              <span>حدود التماس</span>
+              <div className={`w-2 h-2 rounded-full ${config.showBorders ? 'bg-purple-500 shadow-[0_0_8px_#f0f]' : 'bg-[var(--border)]'}`} />
+            </button>
+            <button
+              onClick={() => onUpdate({ ...config, showGlow: !config.showGlow })}
+              className={`py-2 text-[8px] font-bold uppercase border border-[var(--border)] rounded flex flex-col items-center justify-center gap-1 ${config.showGlow ? 'bg-red-600/20 text-red-400 border-red-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
+            >
+              <span>توهج التداخل</span>
+              <div className={`w-2 h-2 rounded-full ${config.showGlow ? 'bg-red-500 shadow-[0_0_8px_#f00]' : 'bg-[var(--border)]'}`} />
+            </button>
+          </div>
         </section>
 
         {/* Final Touches */}

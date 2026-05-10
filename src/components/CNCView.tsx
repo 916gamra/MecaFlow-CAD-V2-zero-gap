@@ -47,6 +47,16 @@ const CNCView: React.FC<CNCViewProps> = ({ config }) => {
         </div>
       </div>
       
+      {config.tube.shape === 'مخصص' && (
+        <div className="mx-4 mt-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded flex items-start gap-2">
+          <span className="text-yellow-500 mt-0.5">⚠️</span>
+          <div className="text-[10px] text-yellow-200/80 leading-relaxed">
+            <strong className="block text-yellow-500 mb-1">تنبيه: دقة مسار القص للملفات المخصصة</strong>
+            محرك الـ CNC الرياضي الحالي يعتمد نموذج القص المخروطي البيضاوي. بالنسبة لملفات STL المخصصة والأشكال المعقدة، قد يكون مسار القطع المُوَلّد تقريبياً.
+          </div>
+        </div>
+      )}
+      
       {hasError ? (
         <div className="flex-1 overflow-y-auto p-4 bg-[#0c0d10] border-x border-[var(--border)]">
           <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-lg">
