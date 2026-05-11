@@ -31,7 +31,7 @@ class ErrorBoundary extends React.Component<Props, State> {
       error,
       errorInfo,
     });
-    
+
     errorLogger.logError(
       error.message,
       ErrorSeverity.CRITICAL,
@@ -57,7 +57,7 @@ class ErrorBoundary extends React.Component<Props, State> {
               <AlertCircle className="w-8 h-8 text-red-500" />
               <h1 className="text-2xl font-bold text-red-100">حدث خطأ غير متوقع!</h1>
             </div>
-            
+
             <p className="text-gray-400 mb-6 text-sm">
               عذراً، واجه النظام مشكلة أثناء المعالجة. يرجى محاولة إعادة تحميل التطبيق.
             </p>

@@ -14,6 +14,38 @@ export interface CADPart {
   opacity: number;
 }
 
+// ── Wizard Step ─────────────────────────────────────────────────────────────
+export type WizardStep =
+  | 'dashboard'        // 0 - لوحة التحكم الرئيسية
+  | 'tube-design'      // 1 - تصميم الأنبوب
+  | 'pan-design'       // 2 - تصميم المقلاة
+  | 'handle-design'    // 3 - تصميم المقبض
+  | 'pan-tube-cut'     // 4 - تقاطع المقلاة + الأنبوب
+  | 'tube-handle-cut'  // 5 - تقاطع الأنبوب + المقبض
+  | 'final-inspect';   // 6 - المعاينة النهائية
+
+/** Ordered list for stepper navigation */
+export const WIZARD_STEPS: WizardStep[] = [
+  'dashboard',
+  'tube-design',
+  'pan-design',
+  'handle-design',
+  'pan-tube-cut',
+  'tube-handle-cut',
+  'final-inspect',
+];
+
+export const WIZARD_LABELS: Record<WizardStep, string> = {
+  'dashboard':       'البداية',
+  'tube-design':     'الأنبوب',
+  'pan-design':      'المقلاة',
+  'handle-design':   'المقبض',
+  'pan-tube-cut':    'مقلاة+أنبوب',
+  'tube-handle-cut': 'أنبوب+مقبض',
+  'final-inspect':   'المعاينة',
+};
+
+// ── Pan Config ──────────────────────────────────────────────────────────────
 export interface PanConfig {
   bottomDiameter: number;
   topDiameter: number;
@@ -30,11 +62,12 @@ export interface PanConfig {
   applyThicknessToCut: boolean; // تطبيق السمك على عملية القطع
 }
 
+// ── Tube Config ─────────────────────────────────────────────────────────────
 export interface TubeConfig {
-  width: number;          
-  height: number;         
-  thickness: number;      
-  totalLength: number;         
+  width: number;
+  height: number;
+  thickness: number;
+  totalLength: number;
   partLength: number;
   cornerRadius: number;
   shape: 'دائري' | 'بيضاوي' | 'مخصص';
@@ -42,6 +75,22 @@ export interface TubeConfig {
   customStlName?: string;
 }
 
+// ── Handle Config (جديد) ────────────────────────────────────────────────────
+export interface HandleConfig {
+  shape: 'rectangular' | 'cylindrical';
+  width: number;          // عرض (أو قطر إذا أسطوانة)
+  height: number;         // ارتفاع المقطع
+  depth: number;          // عمق/طول المقبض
+  thickness: number;      // سمك المعدن
+  cornerRadius: number;   // تنعيم حواف المقبض
+  // زوايا اتصال المقبض بالأنبوب (طرف B)
+  angleX: number;         // زاوية ميلان X
+  angleY: number;         // زاوية ميلان Y
+  offsetZ: number;        // إزاحة Z
+  insertionDepth: number; // عمق التداخل مع الأنبوب
+}
+
+// ── Assembly Config ─────────────────────────────────────────────────────────
 export interface AssemblyConfig {
   tiltAngle: number;
   handleAngleX: number;
@@ -52,9 +101,11 @@ export interface AssemblyConfig {
   tiltAxis: 'X' | 'Y';
 }
 
+// ── Full State ──────────────────────────────────────────────────────────────
 export interface ZeroGapState {
   pan: PanConfig;
   tube: TubeConfig;
+  handle: HandleConfig;
   assembly: AssemblyConfig;
   renderMode: 'preview' | 'boolean';
   addFillet: boolean;
@@ -73,4 +124,5 @@ export interface CADState {
   gridVisible: boolean;
   units: 'mm' | 'inch';
   zeroGap: ZeroGapState;
+  wizardStep: WizardStep;
 }

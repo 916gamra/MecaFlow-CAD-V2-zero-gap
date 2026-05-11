@@ -35,18 +35,18 @@ const CNCView: React.FC<CNCViewProps> = ({ config }) => {
   };
 
   return (
-    <div className="w-full h-full bg-[var(--bg-deep)] text-[var(--accent)] font-mono p-8 rounded overflow-hidden flex flex-col" id="cnc-view">
-      <div className="bg-[var(--bg-header)] p-4 border border-[var(--border)] rounded-t flex items-center justify-between">
+    <div className="w-full h-full bg-(--bg-deep) text-(--accent) font-mono p-8 rounded overflow-hidden flex flex-col" id="cnc-view">
+      <div className="bg-(--bg-header) p-4 border border-(--border) rounded-t flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className={`w-2 h-2 rounded-full animate-pulse ${hasError ? 'bg-red-500' : 'bg-[var(--accent)]'}`} />
-          <span className="text-[11px] font-bold text-[var(--text-main)] uppercase tracking-widest">NCCSTUDIO V15 G-CODE GEN</span>
+          <div className={`w-2 h-2 rounded-full animate-pulse ${hasError ? 'bg-red-500' : 'bg-(--accent)'}`} />
+          <span className="text-[11px] font-bold text-(--text-main) uppercase tracking-widest">NCCSTUDIO V15 G-CODE GEN</span>
         </div>
         <div className="flex gap-2">
-            <span className="px-2 py-0.5 bg-[#0c0d10] text-[10px] rounded border border-[var(--border)] text-[var(--text-dim)]">Laser PWR: 1500W</span>
-            <span className="px-2 py-0.5 bg-[#0c0d10] text-[10px] rounded border border-[var(--border)] text-[var(--text-dim)]">Gas: O2</span>
+            <span className="px-2 py-0.5 bg-[#0c0d10] text-[10px] rounded border border-(--border) text-(--text-dim)">Laser PWR: 1500W</span>
+            <span className="px-2 py-0.5 bg-[#0c0d10] text-[10px] rounded border border-(--border) text-(--text-dim)">Gas: O2</span>
         </div>
       </div>
-      
+
       {config.tube.shape === 'مخصص' && (
         <div className="mx-4 mt-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded flex items-start gap-2">
           <span className="text-yellow-500 mt-0.5">⚠️</span>
@@ -56,29 +56,29 @@ const CNCView: React.FC<CNCViewProps> = ({ config }) => {
           </div>
         </div>
       )}
-      
+
       {hasError ? (
-        <div className="flex-1 overflow-y-auto p-4 bg-[#0c0d10] border-x border-[var(--border)]">
+        <div className="flex-1 overflow-y-auto p-4 bg-[#0c0d10] border-x border-(--border)">
           <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-lg">
             <h3 className="text-red-500 font-bold text-sm mb-2">خطأ في توليد G-Code</h3>
-            <p className="text-[var(--text-dim)] text-xs">{gcodeResult.error}</p>
-            <p className="text-[var(--text-dim)] text-xs mt-2">تحقق من زاوية الميل ومسافة الاختراق</p>
+            <p className="text-(--text-dim) text-xs">{gcodeResult.error}</p>
+            <p className="text-(--text-dim) text-xs mt-2">تحقق من زاوية الميل ومسافة الاختراق</p>
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto p-4 bg-[#0c0d10] border-x border-[var(--border)] space-y-1 text-[12px]">
+        <div className="flex-1 overflow-y-auto p-4 bg-[#0c0d10] border-x border-(--border) space-y-1 text-[12px]">
           {gcodeLines.map((line, idx) => {
             const isComment = line.startsWith('(') || line.startsWith(';');
             const isMCode = line.startsWith('M');
             const isGCode = line.startsWith('G');
             return (
-              <p 
-                key={idx} 
+              <p
+                key={idx}
                 className={
-                  isComment ? 'text-[var(--text-dim)] opacity-50' :
-                  isMCode ? 'text-[var(--text-main)]' :
-                  isGCode ? 'text-[var(--accent)] font-bold' :
-                  'text-[var(--text-dim)]'
+                  isComment ? 'text-(--text-dim) opacity-50' :
+                  isMCode ? 'text-(--text-main)' :
+                  isGCode ? 'text-(--accent) font-bold' :
+                  'text-(--text-dim)'
                 }
               >
                 {line}
@@ -89,13 +89,13 @@ const CNCView: React.FC<CNCViewProps> = ({ config }) => {
         </div>
       )}
 
-      <div className="p-4 bg-[var(--bg-header)] border border-[var(--border)] rounded-b flex justify-between items-center">
-        <div className="text-[10px] text-[var(--text-dim)] uppercase tracking-widest font-bold">
+      <div className="p-4 bg-(--bg-header) border border-(--border) rounded-b flex justify-between items-center">
+        <div className="text-[10px] text-(--text-dim) uppercase tracking-widest font-bold">
           EST TUBE CUT TIME: {hasError ? '--:--:--' : estimatedTime}
         </div>
-        <button 
+        <button
           onClick={handleExport}
-          className="px-6 py-2 bg-[var(--accent)] text-white text-[11px] font-bold rounded hover:opacity-90 transition-opacity uppercase tracking-widest shadow-[0_0_15px_rgba(242,125,38,0.2)]"
+          className="px-6 py-2 bg-(--accent) text-white text-[11px] font-bold rounded hover:opacity-90 transition-opacity uppercase tracking-widest shadow-[0_0_15px_rgba(242,125,38,0.2)]"
         >
            تصدير مسار الليزر
         </button>
