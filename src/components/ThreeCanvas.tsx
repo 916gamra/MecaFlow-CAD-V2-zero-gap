@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } f
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { OrbitControls, STLExporter, STLLoader } from 'three-stdlib';
-import { CSG } from 'three-csg-ts';
+import { Brush, Evaluator, SUBTRACTION, INTERSECTION, ADDITION } from 'three-bvh-csg';
 import { ZeroGapState, WizardStep } from '../types';
 import { validateTubeConfig, validatePanConfig } from '../lib/validators';
 import { performanceOptimizer } from '../lib/performanceOptimizer';
@@ -257,11 +257,11 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
           const p: THREE.Vector2[] = [];
 
           if (config.pan.removeBottom) {
-            // إزالة القاع = شكل إناء/وعاء بجدران مستقيمة من الأسفل
-            // نبدأ من أعلى الجدار فقط — بدون قاع أو تقوس أسفل
-            p.push(new THREE.Vector2(rb, rOff > 0 ? wt : 0));
+            // إزالة التقوس فقط = قاع مسطح + جدران مستقيمة (بدون fillet)
+            p.push(new THREE.Vector2(0, rOff > 0 ? wt : 0));   // مركز القاع
+            p.push(new THREE.Vector2(rb, rOff > 0 ? wt : 0));  // حافة القاع مباشرة
           } else {
-            // مع القاع: نقطة المركز + قوس الفيليه
+            // مع التقوس: نقطة المركز + fillet سفلي
             p.push(new THREE.Vector2(0, rOff > 0 ? wt : 0));
             if (fR > 0) {
               const segs = 16;
@@ -274,7 +274,7 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
             }
           }
 
-          const startZ = config.pan.removeBottom ? (rOff > 0 ? wt : 0) : ((rOff > 0 ? wt : 0) + fR);
+          const startZ = (rOff > 0 ? wt : 0) + (config.pan.removeBottom ? 0 : fR);
           const bulgeReduction = rOff >= wt ? rOff * 0.3 : 0;
           const bulge = Math.max(1.0, Math.min(20.0, (200.0 / curveRad) * 4.0) - bulgeReduction);
           const rM = (rb + rt) / 2.0 + bulge;
@@ -314,38 +314,35 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
           panInnerMesh.name = 'zerogap_pan_inner';
         }
 
-        // ── HANDLE-ONLY STEP: Show handle mesh isolated ──────────────────────
+        // ── HANDLE-ONLY STEP ──────────────────────────────────────────────
         if (wizardStep === 'handle-design') {
           const hCfg = config.handle;
+          const isSolid = !!hCfg.solid;
           let handleGeom: THREE.BufferGeometry;
+
           if (hCfg.shape === 'cylindrical') {
-            // أسطوانة مجوّفة (أنبوب دائري)
-            const outerR = hCfg.width / 2;
-            const innerR = Math.max(1, outerR - hCfg.thickness);
-            const outerCyl = new THREE.CylinderGeometry(outerR, outerR, hCfg.depth, 32, 1, true);
-            const innerCyl = new THREE.CylinderGeometry(innerR, innerR, hCfg.depth, 32, 1, true);
-            // Top and bottom caps (annular rings)
-            const topRing = new THREE.RingGeometry(innerR, outerR, 32);
-            topRing.rotateX(-Math.PI / 2);
-            topRing.translate(0, hCfg.depth / 2, 0);
-            const bottomRing = new THREE.RingGeometry(innerR, outerR, 32);
-            bottomRing.rotateX(Math.PI / 2);
-            bottomRing.translate(0, -hCfg.depth / 2, 0);
-            try {
-              handleGeom = BufferGeometryUtils.mergeGeometries([outerCyl, innerCyl, topRing, bottomRing], false);
-            } catch {
-              handleGeom = outerCyl;
+            if (isSolid) {
+              handleGeom = new THREE.CylinderGeometry(hCfg.width / 2, hCfg.width / 2, hCfg.depth, 32);
+            } else {
+              const outerR = hCfg.width / 2;
+              const innerR = Math.max(1, outerR - hCfg.thickness);
+              const outerCyl = new THREE.CylinderGeometry(outerR, outerR, hCfg.depth, 32, 1, true);
+              const innerCyl = new THREE.CylinderGeometry(innerR, innerR, hCfg.depth, 32, 1, true);
+              const topRing = new THREE.RingGeometry(innerR, outerR, 32);
+              topRing.rotateX(-Math.PI / 2); topRing.translate(0, hCfg.depth / 2, 0);
+              const bottomRing = new THREE.RingGeometry(innerR, outerR, 32);
+              bottomRing.rotateX(Math.PI / 2); bottomRing.translate(0, -hCfg.depth / 2, 0);
+              try { handleGeom = BufferGeometryUtils.mergeGeometries([outerCyl, innerCyl, topRing, bottomRing], false); }
+              catch { handleGeom = outerCyl; }
             }
             handleGeom.rotateX(Math.PI / 2);
           } else {
-            // مستطيل مجوّف
             const hw = hCfg.width, hh = hCfg.height, hd = hCfg.depth;
             const hr = Math.min(hCfg.cornerRadius, hw / 2, hh / 2);
             const hShape = new THREE.Shape();
             const hx = -hw / 2, hy = -hh / 2;
             if (hr > 0) {
-              hShape.moveTo(hx + hr, hy);
-              hShape.lineTo(hx + hw - hr, hy);
+              hShape.moveTo(hx + hr, hy); hShape.lineTo(hx + hw - hr, hy);
               hShape.quadraticCurveTo(hx + hw, hy, hx + hw, hy + hr);
               hShape.lineTo(hx + hw, hy + hh - hr);
               hShape.quadraticCurveTo(hx + hw, hy + hh, hx + hw - hr, hy + hh);
@@ -357,41 +354,58 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
               hShape.moveTo(hx, hy); hShape.lineTo(hx + hw, hy);
               hShape.lineTo(hx + hw, hy + hh); hShape.lineTo(hx, hy + hh); hShape.closePath();
             }
-            // تجويف (hole) — المقبض دائماً مجوّف
-            const it = hCfg.thickness;
-            if (it > 0 && it < hw / 2 && it < hh / 2) {
-              const ir = Math.max(0, hr - it);
-              const ix = hx + it, iy = hy + it;
-              const iw = hw - 2 * it, ih = hh - 2 * it;
-              const hole = new THREE.Path();
-              if (ir > 0) {
-                hole.moveTo(ix + ir, iy); hole.lineTo(ix + iw - ir, iy);
-                hole.quadraticCurveTo(ix + iw, iy, ix + iw, iy + ir);
-                hole.lineTo(ix + iw, iy + ih - ir);
-                hole.quadraticCurveTo(ix + iw, iy + ih, ix + iw - ir, iy + ih);
-                hole.lineTo(ix + ir, iy + ih);
-                hole.quadraticCurveTo(ix, iy + ih, ix, iy + ih - ir);
-                hole.lineTo(ix, iy + ir);
-                hole.quadraticCurveTo(ix, iy, ix + ir, iy);
-              } else {
-                hole.moveTo(ix, iy); hole.lineTo(ix + iw, iy);
-                hole.lineTo(ix + iw, iy + ih); hole.lineTo(ix, iy + ih); hole.closePath();
+            if (!isSolid) {
+              const it = hCfg.thickness;
+              if (it > 0 && it < hw / 2 && it < hh / 2) {
+                const ir = Math.max(0, hr - it);
+                const ix = hx + it, iy = hy + it, iw = hw - 2 * it, ih = hh - 2 * it;
+                const hole = new THREE.Path();
+                if (ir > 0) {
+                  hole.moveTo(ix + ir, iy); hole.lineTo(ix + iw - ir, iy);
+                  hole.quadraticCurveTo(ix + iw, iy, ix + iw, iy + ir);
+                  hole.lineTo(ix + iw, iy + ih - ir);
+                  hole.quadraticCurveTo(ix + iw, iy + ih, ix + iw - ir, iy + ih);
+                  hole.lineTo(ix + ir, iy + ih);
+                  hole.quadraticCurveTo(ix, iy + ih, ix, iy + ih - ir);
+                  hole.lineTo(ix, iy + ir);
+                  hole.quadraticCurveTo(ix, iy, ix + ir, iy);
+                } else {
+                  hole.moveTo(ix, iy); hole.lineTo(ix + iw, iy);
+                  hole.lineTo(ix + iw, iy + ih); hole.lineTo(ix, iy + ih); hole.closePath();
+                }
+                hShape.holes.push(hole);
               }
-              hShape.holes.push(hole);
             }
             handleGeom = new THREE.ExtrudeGeometry(hShape, { depth: hd, bevelEnabled: false, curveSegments: 16 });
           }
+
           handleGeom.center();
           const handleMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, metalness: 0.5, roughness: 0.3 });
           const handleMeshObj = new THREE.Mesh(handleGeom, handleMat);
           handleMeshObj.name = 'zerogap_handle_preview';
-          const edges = new THREE.EdgesGeometry(handleGeom);
-          handleMeshObj.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x115533, transparent: true, opacity: 0.5 })));
+          const hEdges = new THREE.EdgesGeometry(handleGeom);
+          handleMeshObj.add(new THREE.LineSegments(hEdges, new THREE.LineBasicMaterial({ color: 0x115533, transparent: true, opacity: 0.5 })));
           scene.add(handleMeshObj);
           exportMeshRef.current = handleMeshObj;
-          setIsLoading(false);
 
-          // Auto-frame
+          // أنبوب wireframe خلف المقبض (معلوماتي)
+          const tw2 = config.tube.width, th2 = config.tube.shape === 'دائري' ? tw2 : config.tube.height;
+          const tl2 = config.tube.totalLength;
+          let bgTubeGeom: THREE.BufferGeometry;
+          if (config.tube.shape === 'دائري') {
+            bgTubeGeom = new THREE.CylinderGeometry(tw2/2, tw2/2, tl2, 24);
+            bgTubeGeom.rotateX(Math.PI / 2);
+          } else {
+            bgTubeGeom = new THREE.BoxGeometry(tw2, th2, tl2);
+          }
+          bgTubeGeom.center();
+          const bgTubeMesh = new THREE.Mesh(bgTubeGeom, new THREE.MeshBasicMaterial({
+            color: 0xaaaaaa, wireframe: true, transparent: true, opacity: 0.15
+          }));
+          bgTubeMesh.name = 'zerogap_tube_bg_wf';
+          scene.add(bgTubeMesh);
+
+          setIsLoading(false);
           if (controlsRef.current && cameraRef.current) {
             const bb = new THREE.Box3().setFromObject(handleMeshObj);
             const center = new THREE.Vector3(); bb.getCenter(center);
@@ -402,7 +416,7 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
             cameraRef.current.position.set(center.x + dist * 0.5, center.y + dist * 0.6, center.z + dist);
             controlsRef.current.update();
           }
-          return; // DONE for handle-design step
+          return;
         }
 
         // ── PAN-ONLY STEP: Show pan wireframes isolated ──────────────────────
@@ -522,6 +536,9 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
         const tubeMesh = new THREE.Mesh(tubeGeom, new THREE.MeshStandardMaterial({
           color: 0xcccccc, metalness: 0.5, roughness: 0.3
         }));
+        // مركز الأنبوب دائماً في (0,0,0)
+        tubeGeom.center();
+        tubeGeom.computeBoundingBox();
 
         // ── TUBE-ONLY STEP ──────────────────────────────────────────────────
         if (wizardStep === 'tube-design') {
@@ -535,50 +552,41 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
           scene.add(tubeMesh);
           exportMeshRef.current = tubeMesh;
           setIsLoading(false);
-          // Auto-frame
+          // Auto-frame: always reset camera in tube-design
           if (controlsRef.current && cameraRef.current) {
             const bb = new THREE.Box3().setFromObject(tubeMesh);
             const center = new THREE.Vector3(); bb.getCenter(center);
-            controlsRef.current.target.copy(center);
+            controlsRef.current.target.set(0, 0, 0);
             const maxDim = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z) || 100;
             const fov = cameraRef.current.fov * (Math.PI / 180);
             const dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
-            cameraRef.current.position.set(center.x + dist * 0.5, center.y + dist * 0.6, center.z + dist);
+            cameraRef.current.position.set(dist * 0.5, dist * 0.6, dist);
             controlsRef.current.update();
           }
-          return; // DONE for tube-design step
+          return;
         }
 
-        // ── 3. Handle cutter ─────────────────────────────────────────────────
+
+        // ── 4. Apply assembly transforms ────────────────────────────────
         const tiltAxis = config.assembly.tiltAxis || 'X';
-        const handleAxX = (config.assembly.handleAngleX || 0) * (Math.PI / 180);
-        const handleAxY = (config.assembly.handleAngleY || 0) * (Math.PI / 180);
-        const handleOff = config.assembly.handleOffset || 0;
-
-        const hcGeom = new THREE.BoxGeometry(tw * 4, th * 4, tl);
-        hcGeom.translate(0, handleOff, tl / 2);
-        const hcMesh = new THREE.Mesh(hcGeom);
-        hcMesh.position.set(0, 0, tl);
-        hcMesh.rotation.x = -handleAxX;
-        hcMesh.rotation.y = -handleAxY;
-        hcMesh.updateMatrixWorld(true);
-
-        // ── 4. Apply assembly transforms ─────────────────────────────────────
         const angleRad = (90 - config.assembly.tiltAngle) * (Math.PI / 180);
+        const handleAngleTwist = (config.assembly.handleAngleY || 0) * (Math.PI / 180);
 
-        // Pan sits at partLength on Z
+        // Pan at partLength relative to tube center (tube is already centered)
+        const panZOffset = config.tube.partLength - tl / 2;
         if (panMesh) {
-          panMesh.position.set(0, 0, config.tube.partLength);
+          panMesh.position.set(0, 0, panZOffset);
           panMesh.updateMatrixWorld(true);
         }
         if (panInnerMesh) {
-          panInnerMesh.position.copy(panMesh?.position || new THREE.Vector3(0, 0, config.tube.partLength));
-          panInnerMesh.rotation.copy(panMesh?.rotation || new THREE.Euler());
+          panInnerMesh.position.set(0, 0, panZOffset);
           panInnerMesh.updateMatrixWorld(true);
         }
 
-        // Tube positioned and tilted
+        // Tube tilt + offset
         tubeMesh.position.set(0, config.assembly.heightOffset, -config.assembly.insertionDistance);
+        tubeMesh.rotation.set(0, 0, 0);
+        tubeMesh.rotation.y = handleAngleTwist;
         if (tiltAxis === 'X') {
           tubeMesh.rotation.x = angleRad;
         } else {
@@ -586,107 +594,164 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
         }
         tubeMesh.updateMatrixWorld(true);
 
-        // ── 5. Render: Preview or Boolean ────────────────────────────────────
-        if (config.renderMode === 'preview') {
-          tubeMesh.name = 'zerogap_tube_preview';
-
-          // ── Pan wireframe rendering ──────────────────────────────────────
-          // Outer pan: cyan wireframe (always visible)
-          const panOuterWf = new THREE.Mesh(panGeom, new THREE.MeshBasicMaterial({
-            color: 0x00E5FF, wireframe: true, transparent: true, opacity: 0.35
+        // ── M5: tube-handle-cut — handled separately ─────────────────────────
+        if (wizardStep === 'tube-handle-cut') {
+          // Tube as wireframe (fixed reference)
+          const tubeWf = new THREE.Mesh(tubeGeom.clone(), new THREE.MeshBasicMaterial({
+            color: 0x00E5FF, wireframe: true, transparent: true, opacity: 0.25
           }));
-          panOuterWf.name = 'zerogap_pan_outer_wf';
-          panOuterWf.position.copy(panMesh.position);
-          panOuterWf.rotation.copy(panMesh.rotation);
-          scene.add(panOuterWf);
+          tubeWf.name = 'zerogap_tube_wf_m5';
+          scene.add(tubeWf);
 
-          // Inner pan: orange wireframe (only in shell mode)
-          if (config.pan.useShellPreview) {
-            const panInnerWf = new THREE.Mesh(panInnerGeom, new THREE.MeshBasicMaterial({
-              color: 0xFFA500, wireframe: true, transparent: true, opacity: 0.25
-            }));
-            panInnerWf.name = 'zerogap_pan_inner_wf';
-            panInnerWf.position.copy(panMesh.position);
-            panInnerWf.rotation.copy(panMesh.rotation);
-            scene.add(panInnerWf);
+          // Build handle visual
+          const hCfg2 = config.handle;
+          let hGeom2: THREE.BufferGeometry;
+          if (hCfg2.shape === 'cylindrical') {
+            hGeom2 = new THREE.CylinderGeometry(hCfg2.width/2, hCfg2.width/2, hCfg2.depth, 32);
+            hGeom2.rotateX(Math.PI / 2);
+          } else {
+            const hw2 = hCfg2.width, hh2 = hCfg2.height;
+            const hr2 = Math.min(hCfg2.cornerRadius || 0, hw2/2, hh2/2);
+            const hShape2 = new THREE.Shape();
+            const hx2 = -hw2/2, hy2 = -hh2/2;
+            if (hr2 > 0) {
+              hShape2.moveTo(hx2+hr2,hy2); hShape2.lineTo(hx2+hw2-hr2,hy2);
+              hShape2.quadraticCurveTo(hx2+hw2,hy2,hx2+hw2,hy2+hr2);
+              hShape2.lineTo(hx2+hw2,hy2+hh2-hr2);
+              hShape2.quadraticCurveTo(hx2+hw2,hy2+hh2,hx2+hw2-hr2,hy2+hh2);
+              hShape2.lineTo(hx2+hr2,hy2+hh2);
+              hShape2.quadraticCurveTo(hx2,hy2+hh2,hx2,hy2+hh2-hr2);
+              hShape2.lineTo(hx2,hy2+hr2);
+              hShape2.quadraticCurveTo(hx2,hy2,hx2+hr2,hy2);
+            } else {
+              hShape2.moveTo(hx2,hy2); hShape2.lineTo(hx2+hw2,hy2);
+              hShape2.lineTo(hx2+hw2,hy2+hh2); hShape2.lineTo(hx2,hy2+hh2); hShape2.closePath();
+            }
+            hGeom2 = new THREE.ExtrudeGeometry(hShape2, { depth: hCfg2.depth, bevelEnabled: false });
+          }
+          hGeom2.center();
+          const hMesh2 = new THREE.Mesh(hGeom2, new THREE.MeshStandardMaterial({
+            color: 0x22c55e, metalness: 0.5, roughness: 0.3, transparent: true, opacity: 0.85
+          }));
+          hMesh2.name = 'zerogap_handle_m5';
+          // Handle at end B (positive Z end of the centered tube)
+          hMesh2.position.set(hCfg2.offsetZ || 0, 0, tl / 2 + (hCfg2.insertionDepth || 0));
+          hMesh2.rotation.x = (hCfg2.angleX || 0) * (Math.PI / 180);
+          hMesh2.rotation.y = (hCfg2.angleY || 0) * (Math.PI / 180);
+          hMesh2.updateMatrixWorld(true);
+          const hEdges2 = new THREE.EdgesGeometry(hGeom2);
+          hMesh2.add(new THREE.LineSegments(hEdges2, new THREE.LineBasicMaterial({ color: 0x115533, opacity: 0.6, transparent: true })));
+          scene.add(hMesh2);
+
+          // Contact saddle ring at handle-tube junction
+          if (config.showBorders) {
+            try {
+              const hBrushC = new Brush(hGeom2.clone());
+              hBrushC.position.copy(hMesh2.position); hBrushC.rotation.copy(hMesh2.rotation); hBrushC.updateMatrixWorld(true);
+              const tBrushC = new Brush(tubeGeom.clone()); tBrushC.updateMatrixWorld(true);
+              const cEval = new Evaluator();
+              const cResult = cEval.evaluate(tBrushC, hBrushC, INTERSECTION);
+              if (cResult && cResult.geometry.attributes.position?.count > 0) {
+                const cEdges = new THREE.EdgesGeometry(cResult.geometry, 10);
+                const cLine = new THREE.LineSegments(cEdges, new THREE.LineBasicMaterial({ color: 0x22c55e, linewidth: 2 }));
+                cLine.name = 'zerogap_contact_ring_m5'; cLine.renderOrder = 2;
+                scene.add(cLine);
+              }
+            } catch(e) { console.warn('M5 contact ring:', e); }
           }
 
-          // ── Zero-Gap Visual Feedback ──────────────────────────────────────
-          try {
-            const tubeBSP = CSG.fromMesh(tubeMesh);
-            const panBSP  = CSG.fromMesh(panMesh);
-            const intersectBSP = tubeBSP.intersect(panBSP);
-
-            if (intersectBSP) {
-              // 1. Penetrating tube end — colored GREEN GLOW (for future use/reference)
-              if (config.showGlow) {
-                const glowMesh = CSG.toMesh(intersectBSP, new THREE.Matrix4(), new THREE.MeshStandardMaterial({
-                  color: 0x00ff00,
-                  emissive: 0x00aa00,
-                  emissiveIntensity: 1.5,
-                  transparent: true,
-                  opacity: 0.4,
-                  side: THREE.DoubleSide,
-                  depthTest: true,
-                  depthWrite: false
-                }));
-                glowMesh.name = 'zerogap_intersection_zone';
-                scene.add(glowMesh);
+          // Boolean mode: cut tube with pan + handle
+          if (config.renderMode === 'boolean') {
+            try {
+              const ev = new Evaluator();
+              const tB = new Brush(tubeGeom.clone()); tB.updateMatrixWorld(true);
+              const hB = new Brush(hGeom2.clone());
+              hB.position.copy(hMesh2.position); hB.rotation.copy(hMesh2.rotation); hB.updateMatrixWorld(true);
+              let res = ev.evaluate(tB, hB, SUBTRACTION);
+              if (panMesh && panGeom) {
+                const pB = new Brush(panGeom.clone());
+                pB.position.copy(panMesh.position); pB.updateMatrixWorld(true);
+                res = ev.evaluate(res, pB, SUBTRACTION);
               }
-
-              // 2. RED contact ring on PAN OUTER SURFACE only
-              if (config.showBorders) {
-                try {
-                  // Create a 0.5mm outer "skin" of the pan so the ring only exists on the outer surface
-                  const skinPts = buildPanProfile(0.5);
-                  const skinGeom = new THREE.LatheGeometry(skinPts, 64);
-                  const skinMesh = new THREE.Mesh(skinGeom);
-                  skinMesh.position.copy(panMesh.position);
-                  skinMesh.rotation.copy(panMesh.rotation);
-                  skinMesh.updateMatrixWorld(true);
-                  
-                  const skinBSP = panBSP.subtract(CSG.fromMesh(skinMesh));
-                  const outerRingBSP = tubeBSP.intersect(skinBSP);
-                  
-                  if (outerRingBSP) {
-                    // Render the 0.5mm skin plug as a solid Red mesh, creating a thick 3D ring!
-                    const ringMesh = CSG.toMesh(outerRingBSP, new THREE.Matrix4(), new THREE.MeshBasicMaterial({
-                      color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.95
-                    }));
-                    ringMesh.name = 'zerogap_pan_ring';
-                    ringMesh.renderOrder = 1;
-                    scene.add(ringMesh);
-                  }
-                  skinGeom.dispose();
-                } catch (e) { console.warn('Outer ring failed:', e); }
-
-                // BLUE inner ring — only when tube pierces through full wall thickness
-                if (config.pan.useShellPreview) {
-                  try {
-                    const panInnerBSP = CSG.fromMesh(panInnerMesh);
-                    const innerIntersectBSP = tubeBSP.intersect(panInnerBSP);
-                    if (innerIntersectBSP) {
-                      const innerMesh = CSG.toMesh(innerIntersectBSP, new THREE.Matrix4());
-                      if (innerMesh.geometry.attributes.position && innerMesh.geometry.attributes.position.count > 3) {
-                        const innerEdges = new THREE.EdgesGeometry(innerMesh.geometry, 15);
-                        const innerRing = new THREE.LineSegments(innerEdges, new THREE.LineBasicMaterial({
-                          color: 0x00aaff, linewidth: 3, transparent: true, opacity: 1.0,
-                          depthTest: true
-                        }));
-                        innerRing.name = 'zerogap_pan_inner_ring';
-                        innerRing.renderOrder = 1;
-                        (innerRing.material as THREE.LineBasicMaterial).polygonOffset = true;
-                        (innerRing.material as THREE.LineBasicMaterial).polygonOffsetFactor = -5;
-                        scene.add(innerRing);
-                      }
-                      innerMesh.geometry.dispose();
-                    }
-                  } catch (e) { console.warn('Inner ring failed:', e); }
-                }
+              res.geometry.computeBoundingBox();
+              const gbM5 = res.geometry.boundingBox!;
+              if (gbM5 && isFinite(gbM5.min.x)) {
+                res.geometry.translate(-(gbM5.min.x+gbM5.max.x)/2, -(gbM5.min.y+gbM5.max.y)/2, -(gbM5.min.z+gbM5.max.z)/2);
               }
+              res.geometry.computeVertexNormals();
+              const resMesh = new THREE.Mesh(res.geometry, new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2, side: THREE.DoubleSide }));
+              resMesh.name = 'zerogap_result_m5';
+              scene.remove(tubeWf); scene.remove(hMesh2);
+              scene.add(resMesh);
+              exportMeshRef.current = resMesh;
+            } catch(e) { console.warn('M5 boolean failed:', e); exportMeshRef.current = tubeWf; }
+          } else {
+            exportMeshRef.current = tubeWf;
+          }
+
+          if (panMesh) (panMesh.material as THREE.Material).dispose();
+          if (panInnerMesh) (panInnerMesh.material as THREE.Material).dispose();
+          hcGeom.dispose();
+          setIsLoading(false);
+          if (controlsRef.current && cameraRef.current) {
+            controlsRef.current.target.set(0, 0, 0);
+            const maxDim2 = Math.max(tl, tw, th) || 100;
+            const fov2 = cameraRef.current.fov * (Math.PI / 180);
+            const dist2 = Math.abs(maxDim2 / 2 / Math.tan(fov2 / 2)) * 1.8;
+            cameraRef.current.position.set(dist2 * 0.5, dist2 * 0.6, dist2);
+            controlsRef.current.update();
+          }
+          return;
+        }
+
+        // ── 5. Render: Preview or Boolean ─────────────────────────────────
+        if (config.renderMode === 'preview') {
+
+          // Pan wireframe
+          if (panGeom && panMesh) {
+            const panOuterWf = new THREE.Mesh(panGeom.clone(), new THREE.MeshBasicMaterial({
+              color: 0x00E5FF, wireframe: true, transparent: true, opacity: 0.3
+            }));
+            panOuterWf.name = 'zerogap_pan_outer_wf';
+            panOuterWf.position.copy(panMesh.position);
+            panOuterWf.rotation.copy(panMesh.rotation);
+            scene.add(panOuterWf);
+
+            if (config.pan.useShellPreview && panInnerGeom && panInnerMesh) {
+              const panInnerWf = new THREE.Mesh(panInnerGeom.clone(), new THREE.MeshBasicMaterial({
+                color: 0xFFA500, wireframe: true, transparent: true, opacity: 0.2
+              }));
+              panInnerWf.name = 'zerogap_pan_inner_wf';
+              panInnerWf.position.copy(panInnerMesh.position);
+              panInnerWf.rotation.copy(panInnerMesh.rotation);
+              scene.add(panInnerWf);
             }
-          } catch (err) {
-            console.warn('Zero-Gap visual calculation error:', err);
+          }
+
+          // Contact ring (saddle line) via intersection edges — simple & reliable
+          if (config.showBorders && panGeom && panMesh) {
+            try {
+              const tubeBrush = new Brush(tubeGeom.clone());
+              tubeBrush.position.copy(tubeMesh.position);
+              tubeBrush.rotation.copy(tubeMesh.rotation);
+              tubeBrush.updateMatrixWorld(true);
+              const panBrush = new Brush(panGeom.clone());
+              panBrush.position.copy(panMesh.position);
+              panBrush.rotation.copy(panMesh.rotation);
+              panBrush.updateMatrixWorld(true);
+              const csgEval = new Evaluator();
+              const contactZone = csgEval.evaluate(tubeBrush, panBrush, INTERSECTION);
+              if (contactZone && contactZone.geometry.attributes.position?.count > 3) {
+                // Edge lines on intersection zone = contact ring (saddle)
+                const contactEdges = new THREE.EdgesGeometry(contactZone.geometry, 5);
+                const saddle = new THREE.LineSegments(contactEdges, new THREE.LineBasicMaterial({
+                  color: 0xff2200, linewidth: 2
+                }));
+                saddle.name = 'zerogap_pan_ring';
+                saddle.renderOrder = 2;
+                scene.add(saddle);
+              }
+            } catch(e) { console.warn('Contact ring error:', e); }
           }
 
           try {
@@ -699,66 +764,73 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
           scene.add(tubeMesh);
           exportMeshRef.current = tubeMesh;
 
-          // Handle cutter: only show in tube-handle-cut or final-inspect, NOT in pan-tube-cut
-          if (wizardStep !== 'pan-tube-cut') {
-            hcMesh.name = 'zerogap_handle_cutter_preview';
-            (hcMesh as THREE.Mesh).material = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.1 });
-            scene.add(hcMesh);
-          }
-
-          // Dispose temp geometries
+          // Dispose temps
           if (panMesh) (panMesh.material as THREE.Material).dispose();
           if (panInnerMesh) (panInnerMesh.material as THREE.Material).dispose();
           hcGeom.dispose();
 
         } else {
-          // ── CSG Boolean subtraction ─────────────────────────────────────
+          // ── BVH-CSG Boolean ───────────────────────────────────────────────
           setIsLoading(true);
-          const tubeBSP = CSG.fromMesh(tubeMesh);
-          // If applyThicknessToCut: use inner pan (shell gap), else use solid
-          const cutPanBSP = config.pan.applyThicknessToCut
-            ? CSG.fromMesh(panInnerMesh)  // Cut using inner surface only
-            : CSG.fromMesh(panMesh);      // Cut using full solid (default)
-          const hcBSP   = CSG.fromMesh(hcMesh);
+          const tubeBrushB = new Brush(tubeGeom.clone());
+          tubeBrushB.position.copy(tubeMesh.position);
+          tubeBrushB.rotation.copy(tubeMesh.rotation);
+          tubeBrushB.updateMatrixWorld(true);
 
-          let resultBSP = tubeBSP.subtract(cutPanBSP).subtract(hcBSP);
+          const boolEval = new Evaluator();
+          let resultBrush = tubeBrushB;
+
+          // Step 4: cut by pan only; Step 6: cut by pan + handle
+          if (panMesh && panGeom) {
+            const cutPanBrush = new Brush(
+              (config.pan.applyThicknessToCut && panInnerGeom ? panInnerGeom : panGeom).clone()
+            );
+            cutPanBrush.position.copy(panMesh.position);
+            cutPanBrush.rotation.copy(panMesh.rotation);
+            cutPanBrush.updateMatrixWorld(true);
+            resultBrush = boolEval.evaluate(resultBrush, cutPanBrush, SUBTRACTION);
+          }
+
+          // Handle cut: only in final-inspect (not in pan-tube-cut)
+          if (wizardStep === 'final-inspect') {
+            const hcBrush = new Brush(hcGeom.clone());
+            hcBrush.position.copy(hcMesh.position);
+            hcBrush.rotation.copy(hcMesh.rotation);
+            hcBrush.updateMatrixWorld(true);
+            resultBrush = boolEval.evaluate(resultBrush, hcBrush, SUBTRACTION);
+          }
 
           // Optional laser orientation mark
           if (config.markOrientation) {
             const markGeom = new THREE.CylinderGeometry(1, 1, Math.max(tw, th) * 2, 8);
             markGeom.rotateX(Math.PI / 2);
-            const markMesh = new THREE.Mesh(markGeom);
-            markMesh.position.set(0, th / 2, tl - 15);
-            markMesh.updateMatrixWorld(true);
-            resultBSP = resultBSP.subtract(CSG.fromMesh(markMesh));
+            const markBrush = new Brush(markGeom);
+            markBrush.position.set(0, th / 2, tl - 15);
+            markBrush.updateMatrixWorld(true);
+            resultBrush = boolEval.evaluate(resultBrush, markBrush, SUBTRACTION);
             markGeom.dispose();
           }
 
-          // Twin nesting: mirror the piece tail-to-tail
-          if (config.nestingMode === 'twin') {
-            const singleMesh = CSG.toMesh(resultBSP, new THREE.Matrix4());
-            const twinMesh = singleMesh.clone();
-            twinMesh.rotateY(Math.PI);
-            twinMesh.position.z = tl * 2 + (config.slugGap || 5);
-            twinMesh.updateMatrix();
-            twinMesh.updateMatrixWorld(true);
-            resultBSP = resultBSP.union(CSG.fromMesh(twinMesh));
-            singleMesh.geometry.dispose();
+          // Twin nesting: ONLY in final-inspect
+          if (config.nestingMode === 'twin' && wizardStep === 'final-inspect') {
+            const twinBrush = new Brush(resultBrush.geometry.clone());
+            twinBrush.rotateY(Math.PI);
+            twinBrush.position.z = tl * 2 + (config.slugGap || 5);
+            twinBrush.updateMatrixWorld(true);
+            resultBrush = boolEval.evaluate(resultBrush, twinBrush, ADDITION);
           }
 
-          // Dispose temp geometries before creating final mesh
           tubeGeom.dispose();
-          panGeom.dispose();
+          if (panGeom) panGeom.dispose();
           hcGeom.dispose();
 
-          // Build the final mesh using identity matrix → vertices in world space
           const resultMat = new THREE.MeshStandardMaterial({
             color: 0xcccccc, metalness: 0.8, roughness: 0.2, side: THREE.DoubleSide
           });
-          const finalMesh = CSG.toMesh(resultBSP, new THREE.Matrix4(), resultMat);
+          const finalMesh = new THREE.Mesh(resultBrush.geometry, resultMat);
           finalMesh.name = 'zerogap_result';
 
-          // Safety: CSG may return empty geometry on degenerate inputs
+          // Safety: BVH-CSG may return empty geometry on degenerate inputs
           if (!finalMesh.geometry.attributes.position ||
               finalMesh.geometry.attributes.position.count === 0) {
             finalMesh.geometry = new THREE.BoxGeometry(1, 1, 1);
@@ -841,7 +913,7 @@ const ThreeCanvas = forwardRef<ThreeCanvasRef, ThreeCanvasProps>(({ config, grid
         setEngineError(errorMessage);
         setTimeout(() => setEngineError(null), 5000);
       }
-    }, wizardStep === 'tube-design' || wizardStep === 'pan-design' || wizardStep === 'handle-design' ? 80 : 300); // Faster debounce for simple steps, slower for CSG
+    }, wizardStep === 'tube-design' || wizardStep === 'pan-design' || wizardStep === 'handle-design' ? 80 : 150); // BVH-CSG is fast — 150ms debounce for CSG steps
 
     return () => {
       if (debounceTimerRef.current !== null) {

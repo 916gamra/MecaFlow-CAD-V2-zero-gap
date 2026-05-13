@@ -7,9 +7,7 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
+    define: {},
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -25,7 +23,7 @@ export default defineConfig(({mode}) => {
         output: {
           manualChunks(id: string) {
             if (id.includes('node_modules/three/')) return 'three';
-            if (id.includes('three-csg-ts')) return 'three-csg';
+            if (id.includes('three-bvh-csg') || id.includes('three-mesh-bvh')) return 'three-csg';
             if (id.includes('three-stdlib')) return 'three-stdlib';
           },
         },

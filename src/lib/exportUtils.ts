@@ -62,6 +62,7 @@ pan_bottom_dia     = ${config.pan.bottomDiameter}
 pan_height         = ${config.pan.height}
 pan_curve_r        = ${curveRadius}       # ← كان مُعرَّفاً لكن لم يُمرَّر — تم إصلاحه
 bottom_fillet      = ${config.pan.bottomFilletRadius}
+pan_wall_thickness = ${config.pan.wallThickness ?? 2.0}
 pan_add_rim        = ${config.pan.addRim ? 'True' : 'False'}
 pan_rim_height     = ${config.pan.rimHeight ?? 3.0}
 pan_rim_thickness  = ${config.pan.rimThickness ?? 2.0}
@@ -94,7 +95,7 @@ def ensure_solid(part, label="unnamed"):
     return part
 
 
-def create_pan(top_dia, bottom_dia, height, curve_r, fillet_r, add_rim, rim_height, rim_thick):
+def create_pan(top_dia, bottom_dia, height, curve_r, fillet_r, wall_thick, add_rim, rim_height, rim_thick):
     """
     بناء المقلاة كجسم قاطع.
 
@@ -163,6 +164,13 @@ def create_pan(top_dia, bottom_dia, height, curve_r, fillet_r, add_rim, rim_heig
             .extrude(rim_height)
         )
         pan = pan.union(rim)
+
+    # تجويف المقلاة (shell) إذا كانت السماكة > 0
+    if wall_thick > 0:
+        try:
+            pan = pan.shell(-wall_thick)
+        except Exception as e:
+            print(f"⚠️  فشل shell (التجويف) بسماكة {wall_thick}: {e} — استمرار كجسم صلب")
 
     return pan
 
@@ -282,8 +290,9 @@ pan = create_pan(
     top_dia   = pan_top_dia,
     bottom_dia= pan_bottom_dia,
     height    = pan_height,
-    curve_r   = pan_curve_r,         # ← الإصلاح: يُمرَّر الآن
+    curve_r   = pan_curve_r,
     fillet_r  = bottom_fillet,
+    wall_thick= pan_wall_thickness,
     add_rim   = pan_add_rim,
     rim_height= pan_rim_height,
     rim_thick = pan_rim_thickness,

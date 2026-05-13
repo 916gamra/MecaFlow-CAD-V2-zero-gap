@@ -98,10 +98,14 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({
   ) => (
     <button
       onClick={onClick}
-      className={`w-full py-2 mb-2 text-[10px] font-bold uppercase border border-[var(--border)] rounded flex items-center justify-between px-3 transition-colors ${active ? `bg-[${color}]/10 text-[${color}] border-[${color}]` : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
+      className={`w-full py-2 mb-2 text-[10px] font-bold uppercase border rounded flex items-center justify-between px-3 transition-colors ${!active ? 'border-(--border) text-(--text-dim) hover:border-(--text-main)' : ''}`}
+      style={active ? { backgroundColor: `color-mix(in srgb, ${color} 15%, transparent)`, color: color, borderColor: color } : undefined}
     >
       <span>{label}</span>
-      <div className={`w-3 h-3 rounded-full shrink-0 transition-colors ${active ? `bg-[${color}]` : 'bg-[var(--border)]'}`} />
+      <div
+        className={`w-3 h-3 rounded-full shrink-0 transition-colors ${!active ? 'bg-(--border)' : ''}`}
+        style={active ? { backgroundColor: color } : undefined}
+      />
     </button>
   );
 
@@ -181,7 +185,7 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({
                     </label>
                     {config.tube.customStlName && (
                       <button
-                        onClick={() => onUpdate({ ...config, tube: { ...config.tube, customStlBuffer: undefined, customStlName: undefined } })}
+                        onClick={() => onUpdate({ ...config, tube: { ...config.tube, customStlBuffer: null as any, customStlName: undefined } })}
                         className="px-3 py-1 bg-red-900/50 hover:bg-red-900 text-red-200 rounded text-[10px] uppercase font-bold transition-colors border border-red-800"
                       >مسح (Clear STL)</button>
                     )}
@@ -239,7 +243,7 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({
            ════════════════════════════════════════════════════════════════ */}
         {wizardStep === 'handle-design' && (
           <>
-            <section className="mb-6 border-b border-[var(--border)] pb-2">
+            <section className="mb-4 border-b border-[var(--border)] pb-2">
               <label className="block text-[10px] font-bold text-emerald-400 uppercase mb-3 text-right">شكل المقبض</label>
               <div className="flex bg-[#0c0d10] p-1 border border-[var(--border)] rounded mb-4">
                 <button
@@ -251,11 +255,13 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({
                   onClick={() => updateHandle('shape', 'cylindrical')}
                 >أسطواني</button>
               </div>
-
+              {renderToggle('جسم صلب (بدون تجويف)', !!config.handle.solid,
+                () => onUpdate({ ...config, handle: { ...config.handle, solid: !config.handle.solid } }),
+                '#22c55e')}
               {renderSlider(config.handle.shape === 'cylindrical' ? 'قطر المقبض' : 'عرض المقبض', config.handle.width, v => updateHandle('width', v), 10, 60)}
               {config.handle.shape === 'rectangular' && renderSlider('ارتفاع المقبض', config.handle.height, v => updateHandle('height', v), 5, 40)}
               {renderSlider('طول المقبض', config.handle.depth, v => updateHandle('depth', v), 30, 200)}
-              {renderSlider('سماكة المعدن', config.handle.thickness, v => updateHandle('thickness', v), 0.5, 5, 0.1)}
+              {!config.handle.solid && renderSlider('سماكة المعدن', config.handle.thickness, v => updateHandle('thickness', v), 0.5, 5, 0.1)}
               {config.handle.shape === 'rectangular' && renderSlider('تنعيم الحواف (R)', config.handle.cornerRadius, v => updateHandle('cornerRadius', v), 0, Math.min(config.handle.width/2, config.handle.height/2), 0.1)}
             </section>
           </>
@@ -267,54 +273,32 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({
         {wizardStep === 'pan-tube-cut' && (
           <>
             <section className="mb-6 border-b border-[var(--border)] pb-4">
-              <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3">حالة العرض (Simulation)</label>
+              <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3">وضع العرض</label>
               <div className="flex bg-[#0c0d10] p-1 border border-[var(--border)] rounded">
                 <button
                   className={`flex-1 py-1 text-[10px] font-bold uppercase transition-colors rounded ${config.renderMode === 'preview' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-white'}`}
                   onClick={() => onUpdate({ ...config, renderMode: 'preview' })}
-                >تقاطع التحضير</button>
+                >معاينة التلامس</button>
                 <button
                   className={`flex-1 py-1 text-[10px] font-bold uppercase transition-colors rounded ${config.renderMode === 'boolean' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-white'}`}
                   onClick={() => onUpdate({ ...config, renderMode: 'boolean' })}
-                >التطابق الصفري</button>
+                >قطع صفري (A)</button>
               </div>
             </section>
 
             <section className="mb-6 border-b border-[var(--border)] pb-4">
-              <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3 text-right">زاوية التركيب (طرف المقلاة A)</label>
-              <div className="flex bg-[#0c0d10] p-1 border border-[var(--border)] rounded mb-4">
-                <button
-                  className={`flex-1 py-1 text-[10px] font-bold uppercase transition-colors rounded ${config.assembly.tiltAxis === 'X' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-white'}`}
-                  onClick={() => updateAssembly('tiltAxis', 'X')}
-                >محور X</button>
-                <button
-                  className={`flex-1 py-1 text-[10px] font-bold uppercase transition-colors rounded ${config.assembly.tiltAxis === 'Y' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-white'}`}
-                  onClick={() => updateAssembly('tiltAxis', 'Y')}
-                >محور Y</button>
-              </div>
-              {renderSlider('زاوية ميلان المقلاة', config.assembly.tiltAngle, v => updateAssembly('tiltAngle', v), -90, 90)}
+              <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3 text-right">ضبط تركيب طرف A (المقلاة)</label>
+              {renderSlider('زاوية الميل', config.assembly.tiltAngle, v => updateAssembly('tiltAngle', v), -90, 90)}
+              {renderSlider('دوران Twist', config.assembly.handleAngleY, v => updateAssembly('handleAngleY', v), -45, 45)}
               {renderSlider('الارتفاع من القاع', config.assembly.heightOffset, v => updateAssembly('heightOffset', v), 0, 150)}
-              {renderSlider('مسافة الاختراق', config.assembly.insertionDistance, v => updateAssembly('insertionDistance', v), 0, 150)}
+              {renderSlider('عمق الاختراق', config.assembly.insertionDistance, v => updateAssembly('insertionDistance', v), 0, 150)}
             </section>
 
             <section className="mb-4">
               <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3 text-right">المعايير البصرية</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => onUpdate({ ...config, showBorders: !config.showBorders })}
-                  className={`py-2 text-[8px] font-bold uppercase border border-[var(--border)] rounded flex flex-col items-center justify-center gap-1 ${config.showBorders ? 'bg-purple-600/20 text-purple-400 border-purple-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
-                >
-                  <span>حدود التماس</span>
-                  <div className={`w-2 h-2 rounded-full ${config.showBorders ? 'bg-purple-500 shadow-[0_0_8px_#f0f]' : 'bg-[var(--border)]'}`} />
-                </button>
-                <button
-                  onClick={() => onUpdate({ ...config, showGlow: !config.showGlow })}
-                  className={`py-2 text-[8px] font-bold uppercase border border-[var(--border)] rounded flex flex-col items-center justify-center gap-1 ${config.showGlow ? 'bg-red-600/20 text-red-400 border-red-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
-                >
-                  <span>توهج التداخل</span>
-                  <div className={`w-2 h-2 rounded-full ${config.showGlow ? 'bg-red-500 shadow-[0_0_8px_#f00]' : 'bg-[var(--border)]'}`} />
-                </button>
-              </div>
+              {renderToggle('عرض خط التماس (سرج الحصان)', config.showBorders,
+                () => onUpdate({ ...config, showBorders: !config.showBorders }),
+                '#a855f7')}
             </section>
           </>
         )}
@@ -325,31 +309,32 @@ const ZeroGapControlPanel: React.FC<ControlPanelProps> = ({
         {wizardStep === 'tube-handle-cut' && (
           <>
             <section className="mb-6 border-b border-[var(--border)] pb-4">
-              <label className="block text-[10px] font-bold text-emerald-400 uppercase mb-3 text-right">زاوية اتصال المقبض (طرف B)</label>
-              {renderSlider('زاوية المقبض X', config.handle.angleX, v => updateHandle('angleX', v), -45, 45)}
-              {renderSlider('زاوية المقبض Y', config.handle.angleY, v => updateHandle('angleY', v), -45, 45)}
-              {renderSlider('إزاحة Z', config.handle.offsetZ, v => updateHandle('offsetZ', v), -50, 50)}
-              {renderSlider('عمق التداخل', config.handle.insertionDepth, v => updateHandle('insertionDepth', v), 0, 50)}
+              <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3">وضع العرض</label>
+              <div className="flex bg-[#0c0d10] p-1 border border-[var(--border)] rounded">
+                <button
+                  className={`flex-1 py-1 text-[10px] font-bold uppercase transition-colors rounded ${config.renderMode === 'preview' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-white'}`}
+                  onClick={() => onUpdate({ ...config, renderMode: 'preview' })}
+                >معاينة التلامس</button>
+                <button
+                  className={`flex-1 py-1 text-[10px] font-bold uppercase transition-colors rounded ${config.renderMode === 'boolean' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-white'}`}
+                  onClick={() => onUpdate({ ...config, renderMode: 'boolean' })}
+                >قطع صفري (B)</button>
+              </div>
+            </section>
+
+            <section className="mb-6 border-b border-[var(--border)] pb-4">
+              <label className="block text-[10px] font-bold text-emerald-400 uppercase mb-3 text-right">ضبط تركيب طرف B (المقبض)</label>
+              {renderSlider('زاوية الميل', config.handle.angleX, v => updateHandle('angleX', v), -45, 45)}
+              {renderSlider('دوران Twist', config.handle.angleY, v => updateHandle('angleY', v), -45, 45)}
+              {renderSlider('إزاحة جانبية', config.handle.offsetZ, v => updateHandle('offsetZ', v), -50, 50)}
+              {renderSlider('عمق الاختراق', config.handle.insertionDepth, v => updateHandle('insertionDepth', v), 0, 50)}
             </section>
 
             <section className="mb-4">
               <label className="block text-[10px] font-bold text-[var(--text-dim)] uppercase mb-3 text-right">المعايير البصرية</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => onUpdate({ ...config, showBorders: !config.showBorders })}
-                  className={`py-2 text-[8px] font-bold uppercase border border-[var(--border)] rounded flex flex-col items-center justify-center gap-1 ${config.showBorders ? 'bg-purple-600/20 text-purple-400 border-purple-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
-                >
-                  <span>حدود التماس</span>
-                  <div className={`w-2 h-2 rounded-full ${config.showBorders ? 'bg-purple-500 shadow-[0_0_8px_#f0f]' : 'bg-[var(--border)]'}`} />
-                </button>
-                <button
-                  onClick={() => onUpdate({ ...config, showGlow: !config.showGlow })}
-                  className={`py-2 text-[8px] font-bold uppercase border border-[var(--border)] rounded flex flex-col items-center justify-center gap-1 ${config.showGlow ? 'bg-red-600/20 text-red-400 border-red-500' : 'text-[var(--text-dim)] hover:border-[var(--text-main)]'}`}
-                >
-                  <span>توهج التداخل</span>
-                  <div className={`w-2 h-2 rounded-full ${config.showGlow ? 'bg-red-500 shadow-[0_0_8px_#f00]' : 'bg-[var(--border)]'}`} />
-                </button>
-              </div>
+              {renderToggle('عرض خط التماس', config.showBorders,
+                () => onUpdate({ ...config, showBorders: !config.showBorders }),
+                '#22c55e')}
             </section>
           </>
         )}

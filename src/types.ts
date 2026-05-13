@@ -83,9 +83,10 @@ export interface HandleConfig {
   depth: number;          // عمق/طول المقبض
   thickness: number;      // سمك المعدن
   cornerRadius: number;   // تنعيم حواف المقبض
+  solid?: boolean;        // جسم صلب (بدون تجويف)
   // زوايا اتصال المقبض بالأنبوب (طرف B)
-  angleX: number;         // زاوية ميلان X
-  angleY: number;         // زاوية ميلان Y
+  angleX: number;         // زاوية ميلان X (ميلان تقاطع)
+  angleY: number;         // دوران حول المحور (twist)
   offsetZ: number;        // إزاحة Z
   insertionDepth: number; // عمق التداخل مع الأنبوب
 }
